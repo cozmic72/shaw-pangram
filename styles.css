@@ -1,0 +1,340 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+    color: #333;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    font-weight: 700;
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    opacity: 0.95;
+}
+
+.controls {
+    padding: 30px;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.control-group {
+    margin-bottom: 20px;
+}
+
+.control-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #495057;
+}
+
+.control-group strong {
+    font-weight: 600;
+    color: #212529;
+}
+
+.hint {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: normal;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="file"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 1rem;
+    transition: border-color 0.2s;
+    font-family: 'Noto Sans Shavian', sans-serif;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+input[type="text"]:disabled,
+input[type="number"]:disabled {
+    background: #e9ecef;
+    cursor: not-allowed;
+}
+
+.button-group-inline {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.button-group-inline button {
+    flex: 0 0 auto;
+    padding: 10px 20px;
+    margin: 0;
+}
+
+.or-separator {
+    color: #6c757d;
+    font-style: italic;
+    font-size: 0.9rem;
+}
+
+.button-group-inline input[type="file"] {
+    flex: 1;
+    padding: 8px;
+}
+
+.status-message {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.status-message.loading {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-message.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-message.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 25px;
+}
+
+button {
+    flex: 1;
+    padding: 14px 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#solve-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+#solve-btn:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+#stop-btn {
+    background: #dc3545;
+    color: white;
+}
+
+#stop-btn:not(:disabled):hover {
+    background: #c82333;
+    transform: translateY(-2px);
+}
+
+#clear-btn {
+    background: #6c757d;
+    color: white;
+}
+
+#clear-btn:hover {
+    background: #5a6268;
+    transform: translateY(-2px);
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 20px;
+    padding: 20px 30px;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #667eea;
+}
+
+.results-section {
+    padding: 30px;
+}
+
+.results-section h2 {
+    font-size: 1.8rem;
+    margin-bottom: 20px;
+    color: #212529;
+}
+
+.results-container {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    background: #fff;
+}
+
+.results-container::-webkit-scrollbar {
+    width: 10px;
+}
+
+.results-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.results-container::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 10px;
+}
+
+.results-container::-webkit-scrollbar-thumb:hover {
+    background: #764ba2;
+}
+
+.placeholder,
+.no-results {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6c757d;
+    font-size: 1.1rem;
+}
+
+.result-item {
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    background: linear-gradient(to right, #f8f9fa 0%, #fff 100%);
+    border-left: 4px solid #667eea;
+    border-radius: 4px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    cursor: move;
+    user-select: none;
+}
+
+.result-item:hover {
+    background: linear-gradient(to right, #e9ecef 0%, #f8f9fa 100%);
+    transform: translateX(5px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.result-item.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.result-item.drag-over {
+    border-top: 3px solid #667eea;
+    margin-top: 10px;
+}
+
+.result-number {
+    font-weight: 700;
+    color: #667eea;
+    margin-right: 15px;
+    min-width: 40px;
+}
+
+.result-text {
+    font-size: 1.1rem;
+    font-family: 'Noto Sans Shavian', sans-serif;
+    color: #212529;
+}
+
+.loading-indicator {
+    text-align: center;
+    padding: 20px;
+    color: #667eea;
+    font-style: italic;
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.8rem;
+    }
+
+    .subtitle {
+        font-size: 0.9rem;
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
+
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Support for Shavian font */
+@font-face {
+    font-family: 'Noto Sans Shavian';
+    font-style: normal;
+    font-weight: 400;
+    src: url('https://fonts.gstatic.com/s/notosansshavian/v17/CHy5V_HZE0jxJBQlqAeCKjJvQBNF4EFQSplv2Cwg.woff2') format('woff2');
+    unicode-range: U+10450-1047F;
+}

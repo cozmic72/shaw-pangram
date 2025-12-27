@@ -1,0 +1,3 @@
+[submodule "readlex"]
+	path = readlex
+	url = https://github.com/Shavian-info/readlex.git

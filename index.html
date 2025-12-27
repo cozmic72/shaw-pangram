@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shavian Pangram & Anagram Solver</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>𐑖𐑱𐑝𐑾𐑯 Pangram & Anagram Solver</h1>
+            <p class="subtitle">Find perfect pangrams or solve anagrams using the Shavian alphabet</p>
+        </header>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="readlex-file">
+                    <strong>Dictionary:</strong>
+                </label>
+                <div class="button-group-inline">
+                    <button id="load-default-btn" type="button">Load Default (readlex.json)</button>
+                    <span class="or-separator">or</span>
+                    <input type="file" id="readlex-file" accept=".json" />
+                </div>
+                <div id="load-status" class="status-message"></div>
+            </div>
+
+            <div class="control-group">
+                <label for="target-letters">
+                    <strong>Target Letters:</strong>
+                    <span class="hint">(Leave empty for all 48 Shavian letters)</span>
+                </label>
+                <input
+                    type="text"
+                    id="target-letters"
+                    placeholder="𐑐𐑑𐑒𐑓𐑔𐑕 or leave empty for full alphabet"
+                    disabled
+                />
+            </div>
+
+            <div class="control-group">
+                <label for="starter-words">
+                    <strong>Starter Words:</strong>
+                    <span class="hint">(Optional: words to include, their letters will be removed from target)</span>
+                </label>
+                <input
+                    type="text"
+                    id="starter-words"
+                    placeholder="𐑐𐑑 𐑒𐑓 (space or comma separated)"
+                    disabled
+                />
+            </div>
+
+            <div class="control-group">
+                <label for="exclude-words">
+                    <strong>Exclude Words:</strong>
+                    <span class="hint">(Optional: words to exclude from results)</span>
+                </label>
+                <input
+                    type="text"
+                    id="exclude-words"
+                    placeholder="𐑔𐑕 𐑖𐑗 (space or comma separated)"
+                    disabled
+                />
+            </div>
+
+            <div class="control-group">
+                <label for="exclude-pos">
+                    <strong>Exclude Parts of Speech:</strong>
+                    <span class="hint">(Optional: e.g., "n v adj")</span>
+                </label>
+                <input
+                    type="text"
+                    id="exclude-pos"
+                    placeholder="n, v, adj (space or comma separated)"
+                    disabled
+                />
+            </div>
+
+            <div class="control-group">
+                <label for="max-solutions">
+                    <strong>Max Solutions:</strong>
+                    <span class="hint">(Leave empty for unlimited)</span>
+                </label>
+                <input
+                    type="number"
+                    id="max-solutions"
+                    placeholder="e.g., 100"
+                    min="1"
+                    disabled
+                />
+            </div>
+
+            <div class="button-group">
+                <button id="solve-btn" disabled>Solve</button>
+                <button id="stop-btn" disabled>Stop</button>
+                <button id="clear-btn">Clear Results</button>
+            </div>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-item">
+                <span class="stat-label">Solutions:</span>
+                <span class="stat-value" id="solution-count">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Branches:</span>
+                <span class="stat-value" id="branch-count">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Attempts:</span>
+                <span class="stat-value" id="attempt-count">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Time:</span>
+                <span class="stat-value" id="elapsed-time">0.0s</span>
+            </div>
+        </div>
+
+        <div class="results-section">
+            <h2>Results</h2>
+            <div id="results-container" class="results-container">
+                <div class="placeholder">Load a dictionary and click "Solve" to begin</div>
+            </div>
+            <div id="loading-indicator" class="loading-indicator" style="display: none;">
+                Finding more solutions...
+            </div>
+        </div>
+    </div>
+
+    <script src="pangram-solver.js"></script>
+    <script>
+        let solver = null;
+        let solverWorker = null;
+        let allSolutions = [];
+        let displayedCount = 0;
+        const BATCH_SIZE = 20;
+        let isSearching = false;
+        let startTime = null;
+        let timerInterval = null;
+
+        // DOM elements
+        const readlexFile = document.getElementById('readlex-file');
+        const loadDefaultBtn = document.getElementById('load-default-btn');
+        const loadStatus = document.getElementById('load-status');
+        const targetLetters = document.getElementById('target-letters');
+        const starterWords = document.getElementById('starter-words');
+        const excludeWords = document.getElementById('exclude-words');
+        const excludePos = document.getElementById('exclude-pos');
+        const maxSolutions = document.getElementById('max-solutions');
+        const solveBtn = document.getElementById('solve-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const resultsContainer = document.getElementById('results-container');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const solutionCountEl = document.getElementById('solution-count');
+        const branchCountEl = document.getElementById('branch-count');
+        const attemptCountEl = document.getElementById('attempt-count');
+        const elapsedTimeEl = document.getElementById('elapsed-time');
+
+        // Helper function to load dictionary data
+        async function loadDictionary(data) {
+            solver = new PangramSolver(data);
+
+            loadStatus.textContent = `✓ Loaded ${solver.shawWords.length} words`;
+            loadStatus.className = 'status-message success';
+
+            // Enable controls
+            targetLetters.disabled = false;
+            starterWords.disabled = false;
+            excludeWords.disabled = false;
+            excludePos.disabled = false;
+            maxSolutions.disabled = false;
+            solveBtn.disabled = false;
+        }
+
+        // Load default readlex.json
+        loadDefaultBtn.addEventListener('click', async () => {
+            loadStatus.textContent = 'Loading default dictionary...';
+            loadStatus.className = 'status-message loading';
+
+            try {
+                const response = await fetch('readlex/readlex.json');
+                if (!response.ok) {
+                    throw new Error(`Failed to load: ${response.statusText}`);
+                }
+                const data = await response.json();
+                await loadDictionary(data);
+            } catch (err) {
+                loadStatus.textContent = `✗ Error: ${err.message}`;
+                loadStatus.className = 'status-message error';
+                console.error(err);
+            }
+        });
+
+        // Load custom dictionary file
+        readlexFile.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            loadStatus.textContent = 'Loading custom dictionary...';
+            loadStatus.className = 'status-message loading';
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                await loadDictionary(data);
+            } catch (err) {
+                loadStatus.textContent = `✗ Error: ${err.message}`;
+                loadStatus.className = 'status-message error';
+                console.error(err);
+            }
+        });
+
+        // Solve button
+        solveBtn.addEventListener('click', () => {
+            if (!solver) {
+                alert('Please load a dictionary file first');
+                return;
+            }
+
+            // Clear previous results
+            allSolutions = [];
+            displayedCount = 0;
+            resultsContainer.innerHTML = '';
+
+            // Reset stats
+            solutionCountEl.textContent = '0';
+            branchCountEl.textContent = '0';
+            attemptCountEl.textContent = '0';
+            elapsedTimeEl.textContent = '0.0s';
+
+            // Get parameters
+            let letters = targetLetters.value.trim();
+            const starters = starterWords.value.trim();
+            const exclude = excludeWords.value.trim();
+            const excludePOSTags = excludePos.value.trim();
+            const max = maxSolutions.value ? parseInt(maxSolutions.value) : null;
+
+            // Remove all whitespace from letters
+            if (letters) {
+                letters = letters.replace(/\s+/g, '');
+            }
+
+            // Process starter words
+            if (starters) {
+                const starterLetters = starters.replace(/\s+/g, '');
+                if (!letters) {
+                    // Default to all 48 Shavian letters
+                    letters = '';
+                    for (let i = 0x10450; i < 0x10480; i++) {
+                        letters += String.fromCodePoint(i);
+                    }
+                }
+
+                // Remove starter word letters from target
+                const letterCounts = new Map();
+                for (const letter of letters) {
+                    letterCounts.set(letter, (letterCounts.get(letter) || 0) + 1);
+                }
+
+                for (const letter of starterLetters) {
+                    if ((letterCounts.get(letter) || 0) > 0) {
+                        letterCounts.set(letter, letterCounts.get(letter) - 1);
+                    } else {
+                        alert(`Error: starter word letter '${letter}' not in target letters`);
+                        return;
+                    }
+                }
+
+                // Rebuild letters from counter
+                letters = '';
+                for (const [letter, count] of letterCounts) {
+                    if (count > 0) {
+                        letters += letter.repeat(count);
+                    }
+                }
+            }
+
+            // Process exclusions
+            const excludeWordsSet = exclude ?
+                new Set(exclude.replace(/,/g, ' ').split(/\s+/).filter(w => w)) :
+                new Set();
+
+            const excludePosSet = excludePOSTags ?
+                new Set(excludePOSTags.replace(/,/g, ' ').split(/\s+/).filter(p => p)) :
+                new Set();
+
+            // Set up solution callback
+            solver.onSolution = (solution, count) => {
+                allSolutions.push(solution);
+                solutionCountEl.textContent = count;
+
+                // Display new solution immediately
+                if (displayedCount < allSolutions.length) {
+                    displayNextBatch();
+                }
+
+                // Update stats periodically
+                branchCountEl.textContent = solver.branchCount;
+                attemptCountEl.textContent = solver.attemptCount;
+            };
+
+            // UI updates
+            isSearching = true;
+            solveBtn.disabled = true;
+            stopBtn.disabled = false;
+            startTime = Date.now();
+
+            // Start timer
+            timerInterval = setInterval(() => {
+                const elapsed = (Date.now() - startTime) / 1000;
+                elapsedTimeEl.textContent = `${elapsed.toFixed(1)}s`;
+            }, 100);
+
+            // Run solver asynchronously
+            setTimeout(() => {
+                try {
+                    const solutions = solver.solvePangram(
+                        letters || null,
+                        max,
+                        excludeWordsSet,
+                        excludePosSet
+                    );
+
+                    finishSearch();
+                } catch (err) {
+                    console.error('Solver error:', err);
+                    alert(`Error: ${err.message}`);
+                    finishSearch();
+                }
+            }, 10);
+        });
+
+        // Stop button
+        stopBtn.addEventListener('click', () => {
+            finishSearch();
+        });
+
+        // Clear button
+        clearBtn.addEventListener('click', () => {
+            allSolutions = [];
+            displayedCount = 0;
+            resultsContainer.innerHTML = '<div class="placeholder">Load a dictionary and click "Solve" to begin</div>';
+            solutionCountEl.textContent = '0';
+            branchCountEl.textContent = '0';
+            attemptCountEl.textContent = '0';
+            elapsedTimeEl.textContent = '0.0s';
+        });
+
+        function finishSearch() {
+            isSearching = false;
+            solveBtn.disabled = false;
+            stopBtn.disabled = true;
+
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+
+            // Final stats update
+            if (solver) {
+                branchCountEl.textContent = solver.branchCount;
+                attemptCountEl.textContent = solver.attemptCount;
+            }
+
+            const elapsed = (Date.now() - startTime) / 1000;
+            elapsedTimeEl.textContent = `${elapsed.toFixed(1)}s`;
+
+            if (allSolutions.length === 0) {
+                resultsContainer.innerHTML = '<div class="no-results">No solutions found</div>';
+            }
+        }
+
+        function displayNextBatch() {
+            const fragment = document.createDocumentFragment();
+            const end = Math.min(displayedCount + BATCH_SIZE, allSolutions.length);
+
+            // Remove placeholder if it exists
+            const placeholder = resultsContainer.querySelector('.placeholder');
+            if (placeholder) {
+                placeholder.remove();
+            }
+
+            for (let i = displayedCount; i < end; i++) {
+                const solution = allSolutions[i];
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.draggable = true;
+                div.dataset.index = i;
+                div.innerHTML = `
+                    <span class="result-number">${i + 1}.</span>
+                    <span class="result-text">${solution.join(' ')}</span>
+                `;
+
+                // Add drag event listeners
+                div.addEventListener('dragstart', handleDragStart);
+                div.addEventListener('dragend', handleDragEnd);
+                div.addEventListener('dragover', handleDragOver);
+                div.addEventListener('drop', handleDrop);
+                div.addEventListener('dragleave', handleDragLeave);
+
+                fragment.appendChild(div);
+            }
+
+            resultsContainer.appendChild(fragment);
+            displayedCount = end;
+        }
+
+        // Drag and drop functionality
+        let draggedElement = null;
+
+        function handleDragStart(e) {
+            draggedElement = this;
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', this.innerHTML);
+        }
+
+        function handleDragEnd(e) {
+            this.classList.remove('dragging');
+
+            // Remove drag-over class from all items
+            document.querySelectorAll('.result-item').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+        }
+
+        function handleDragOver(e) {
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+            e.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function handleDragLeave(e) {
+            this.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+
+            if (draggedElement !== this) {
+                // Get indices
+                const draggedIndex = parseInt(draggedElement.dataset.index);
+                const targetIndex = parseInt(this.dataset.index);
+
+                // Swap in allSolutions array
+                const temp = allSolutions[draggedIndex];
+                allSolutions[draggedIndex] = allSolutions[targetIndex];
+                allSolutions[targetIndex] = temp;
+
+                // Re-render all displayed items
+                reRenderResults();
+            }
+
+            this.classList.remove('drag-over');
+            return false;
+        }
+
+        function reRenderResults() {
+            // Clear current results
+            resultsContainer.innerHTML = '';
+
+            // Reset displayed count
+            const currentDisplayedCount = displayedCount;
+            displayedCount = 0;
+
+            // Re-render the same number of items
+            const fragment = document.createDocumentFragment();
+
+            for (let i = 0; i < currentDisplayedCount; i++) {
+                const solution = allSolutions[i];
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.draggable = true;
+                div.dataset.index = i;
+                div.innerHTML = `
+                    <span class="result-number">${i + 1}.</span>
+                    <span class="result-text">${solution.join(' ')}</span>
+                `;
+
+                // Add drag event listeners
+                div.addEventListener('dragstart', handleDragStart);
+                div.addEventListener('dragend', handleDragEnd);
+                div.addEventListener('dragover', handleDragOver);
+                div.addEventListener('drop', handleDrop);
+                div.addEventListener('dragleave', handleDragLeave);
+
+                fragment.appendChild(div);
+            }
+
+            resultsContainer.appendChild(fragment);
+            displayedCount = currentDisplayedCount;
+        }
+
+        // Infinite scroll
+        resultsContainer.addEventListener('scroll', () => {
+            const { scrollTop, scrollHeight, clientHeight } = resultsContainer;
+
+            // If scrolled near bottom and more results available
+            if (scrollHeight - scrollTop - clientHeight < 100 && displayedCount < allSolutions.length) {
+                displayNextBatch();
+            }
+        });
+
+        // Initial display
+        if (displayedCount < allSolutions.length) {
+            displayNextBatch();
+        }
+    </script>
+</body>
+</html>
