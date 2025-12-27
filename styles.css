@@ -628,6 +628,7 @@ button:disabled {
     color: #212529;
     transition: background 0.2s;
     border-bottom: 1px solid #e9ecef;
+    text-transform: none;
 }
 
 .menu-item:last-child {

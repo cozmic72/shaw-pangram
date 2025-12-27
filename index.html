@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shavian Pangram & Anagram Solver</title>
     <link rel="stylesheet" href="styles.css">
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="64x64" href="favicon-64x64.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="favicon-128x128.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192x192.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 </head>
 <body>
     <div class="container">
@@ -19,9 +27,9 @@
 
             <!-- Burger Menu Dropdown -->
             <div id="menu-dropdown" class="menu-dropdown hidden">
-                <button id="menu-about" class="menu-item">About</button>
-                <button id="menu-solutions" class="menu-item">Saved Solutions</button>
-                <button id="menu-share" class="menu-item">Share Current State</button>
+                <button id="menu-about" class="menu-item">About…</button>
+                <button id="menu-solutions" class="menu-item">Saved Solutions…</button>
+                <button id="menu-share" class="menu-item">Share Current State…</button>
             </div>
         </header>
 
@@ -104,8 +112,8 @@
         <div class="results-section">
             <h2>Solutions: <span id="solution-count">0</span></h2>
             <div id="exact-match-actions" class="exact-match-actions hidden">
-                <button id="save-exact-match" class="exact-match-btn">💾 Save</button>
-                <button id="share-exact-match" class="exact-match-btn">🔗 Share</button>
+                <button id="save-exact-match" class="exact-match-btn">💾 Save…</button>
+                <button id="share-exact-match" class="exact-match-btn">🔗 Share…</button>
             </div>
             <div id="results-container" class="results-container">
                 <div class="placeholder">Enter parameters and click "Solve" to begin</div>
@@ -269,7 +277,11 @@
             for (const node of element.childNodes) {
                 if (node.nodeType === Node.TEXT_NODE) {
                     // Filter out zero-width spaces
-                    const content = node.textContent.replace(/\u200B/g, '');
+                    let content = node.textContent.replace(/\u200B/g, '');
+                    if (stripPunctuation) {
+                        // Strip all non-letter/non-number characters
+                        content = content.replace(/[^\p{L}\p{N}]/gu, '');
+                    }
                     text += content;
                 } else if (node.classList && node.classList.contains('word-chip')) {
                     // Get text from chip's data attribute
@@ -284,7 +296,11 @@
                     }
                 } else if (node.classList && node.classList.contains('editable-span')) {
                     // Get text from editable span, filtering zero-width spaces
-                    const content = node.textContent.replace(/\u200B/g, '');
+                    let content = node.textContent.replace(/\u200B/g, '');
+                    if (stripPunctuation) {
+                        // Strip all non-letter/non-number characters
+                        content = content.replace(/[^\p{L}\p{N}]/gu, '');
+                    }
                     text += content;
                 }
             }
@@ -2268,7 +2284,7 @@
         // Update save button state and text
         function updateSaveButtonState() {
             const hasExactMatch = currentParams && currentParams.letters === '';
-            const buttonText = hasExactMatch ? '💾 Save This Pangram' : '💾 Save This Anagram';
+            const buttonText = hasExactMatch ? '💾 Save This Pangram…' : '💾 Save This Anagram…';
 
             if (isCurrentPangramSaved()) {
                 saveExactMatchBtn.disabled = true;
@@ -2326,6 +2342,11 @@
         });
 
         // Encode words as compact string using alphabet offsets
+        // Handles all punctuation including quotes and apostrophes:
+        // - Straight quotes: ' (U+0027), " (U+0022)
+        // - Curly quotes: ' ' (U+2018, U+2019), " " (U+201C, U+201D)
+        // - Shavian middot: · (U+00B7)
+        // - All other punctuation and special chars
         function encodeWords(words, alphabet) {
             if (!words) return '';
 
@@ -2339,6 +2360,7 @@
                     if (alphabet === 'shavian') {
                         if (codepoint < 0x10450 || codepoint > 0x1047F) {
                             // Non-alphabet char: use _ prefix + 4-digit hex
+                            // This includes all punctuation, quotes, apostrophes, etc.
                             encoded += '_' + codepoint.toString(16).padStart(4, '0');
                         } else {
                             // Alphabet char: 2-digit hex offset (00-2F for 48 letters)
@@ -2347,10 +2369,11 @@
                     } else {
                         if (codepoint < 0x61 || codepoint > 0x7A) { // a-z
                             // Non-alphabet char: use _ prefix + 4-digit hex
+                            // This includes all punctuation, quotes, apostrophes, etc.
                             encoded += '_' + codepoint.toString(16).padStart(4, '0');
                         } else {
                             // Alphabet char: 2-digit hex offset (00-19 for 26 letters)
-                            encoded += (codepoint - baseCodepoint).toString(16).padStart(2, '0');
+                            encoded += (codepoint - baseCodepoint).toString(16).padStart(2, '00');
                         }
                     }
                 }

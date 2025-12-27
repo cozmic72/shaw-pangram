@@ -81,6 +81,23 @@ class PangramSolver {
         console.log(`Loaded ${this.shawWords.length} Shavian words, ${this.romanWords.length} Roman words`);
     }
 
+    // Helper to strip punctuation from a word, keeping only alphabet letters
+    stripPunctuation(word, alphabet) {
+        if (alphabet === 'shavian') {
+            // Keep only Shavian letters (U+10450-U+1047F)
+            return [...word].filter(char => {
+                const code = char.codePointAt(0);
+                return code >= 0x10450 && code <= 0x1047F;
+            }).join('');
+        } else {
+            // Keep only a-z
+            return [...word].filter(char => {
+                const code = char.codePointAt(0);
+                return code >= 0x61 && code <= 0x7A;
+            }).join('');
+        }
+    }
+
     buildTrie(targetLetters, excludeWords = new Set(), excludePos = new Set(), alphabet = 'shavian') {
         this.trie = new TrieNode();
         this.keyToWords = new Map();
@@ -102,7 +119,11 @@ class PangramSolver {
         const filteredWords = [];
 
         for (const word of wordList) {
-            const wordSet = new Set(word);
+            // Strip punctuation from word for letter checking
+            const cleanWord = this.stripPunctuation(word, alphabet);
+            if (!cleanWord) continue; // Skip if nothing left after stripping punctuation
+
+            const wordSet = new Set(cleanWord);
 
             // Check if word should be excluded
             if (excludeWords.has(word)) {
@@ -118,11 +139,12 @@ class PangramSolver {
                 }
             }
 
-            // Check if word only uses target letters
+            // Check if word only uses target letters (using cleaned word)
             const usesOnlyTargetLetters = [...wordSet].every(letter => targetLetters.has(letter));
             if (usesOnlyTargetLetters) {
                 filteredWords.push(word);
-                for (const letter of word) {
+                // Count letters from cleaned word only (no punctuation)
+                for (const letter of cleanWord) {
                     letterCounts.set(letter, (letterCounts.get(letter) || 0) + 1);
                 }
             }
@@ -138,8 +160,11 @@ class PangramSolver {
         // Step 3: Build keyToWords dictionary
         const keyToWordsSets = new Map();
         for (const shaw of filteredWords) {
-            // Sort letters by rarity order to create key
-            const key = [...shaw].sort((a, b) => {
+            // Strip punctuation from word for trie key
+            const cleanWord = this.stripPunctuation(shaw, alphabet);
+
+            // Sort letters by rarity order to create key (using cleaned word)
+            const key = [...cleanWord].sort((a, b) => {
                 const indexA = this.letterOrder.indexOf(a);
                 const indexB = this.letterOrder.indexOf(b);
                 return (indexA === -1 ? this.letterOrder.length : indexA) -
@@ -150,7 +175,7 @@ class PangramSolver {
             if (!keyToWordsSets.has(key)) {
                 keyToWordsSets.set(key, new Set());
             }
-            keyToWordsSets.get(key).add(shaw);
+            keyToWordsSets.get(key).add(shaw);  // Store original word with punctuation
         }
 
         // Convert sets to sorted arrays
