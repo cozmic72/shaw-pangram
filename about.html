@@ -1,0 +1,36 @@
+<div class="about-content">
+    <h2>Shavian Pangram & Anagram Solver</h2>
+
+    <p>A web-based tool for finding anagrams or perfect pangrams (using each letter exactly once) for the Shavian alphabet.</p>
+
+    <h3>Features</h3>
+    <ul>
+        <li><strong>Pangram Solver</strong>: Find perfect pangrams for the full 48-letter Shavian alphabet or custom letter sets</li>
+        <li><strong>Anagram Solver</strong>: Solve arbitrary anagrams starting from arbitrary words or phrases</li>
+        <li><strong>Interactive UI</strong>: Drag-and-drop result reordering and auto-pause</li>
+        <li><strong>Save Solutions</strong>: Store your favorite (partial) solutions for later use</li>
+    </ul>
+
+    <h3>How to Use</h3>
+    <ol>
+        <li><strong>Target Letters</strong>: Leave empty for all 48 Shavian letters, or specify custom words or phrases</li>
+        <li><strong>Solve Words</strong>: Words to include in your solution - use this to narrow down the solution space</li>
+        <li><strong>Exclude Words</strong>: Words to exclude from results</li>
+        <li><strong>Drag & Drop</strong>: Reorder results by dragging words to build sentences</li>
+    </ol>
+
+    <h3>Algorithm</h3>
+    <p>The solver uses a Trie-based backtracking algorithm optimized for pangram solving:</p>
+    <ul>
+        <li>Trie construction of all valid words using only target letters</li>
+        <li>Letter rarity ordering to prune the search space early</li>
+        <li>Recursive backtracking to explore word combinations</li>
+        <li>Anagram grouping to avoid duplicate searches</li>
+    </ul>
+
+    <h3>Dictionary</h3>
+    <p>This project uses the <a href="https://github.com/Shavian-info/readlex" target="_blank">readlex</a> dictionary, which contains English words transcribed in the Shavian alphabet.</p>
+
+    <h3>Source Code</h3>
+    <p>Available on <a href="https://github.com/Shavian-info/pangram" target="_blank">GitHub</a></p>
+</div>

@@ -6,12 +6,13 @@ A web-based and command-line tool for finding perfect pangrams (using each lette
 
 - **Pangram Solver**: Find perfect pangrams for the full 48-letter Shavian alphabet or custom letter sets
 - **Anagram Solver**: Solve anagrams with specific letters
-- **Web Interface**: Interactive UI with drag-and-drop result reordering
+- **Web Interface**: Interactive UI with drag-and-drop result reordering and auto-pause
 - **Command-line Interface**: Python script for batch processing
 - **Customizable**:
+  - Target letters (custom or full alphabet)
   - Starter words to reduce the problem space
-  - Exclude specific words or parts of speech
-  - Limit maximum solutions
+  - Exclude specific words
+  - Auto-pause after each batch for performance
 
 ## Setup
 
@@ -41,18 +42,21 @@ This will clone the repository and fetch the readlex dictionary as a submodule.
 
 2. **Open in browser**: Navigate to `http://localhost:8000/index.html`
 
-3. **Load dictionary**: Click "Load Default (readlex.json)" or upload a custom dictionary file
+   The dictionary loads automatically on page load.
 
-4. **Configure options**:
+3. **Configure options** (all optional):
    - **Target Letters**: Leave empty for all 48 Shavian letters, or specify custom letters
-   - **Starter Words**: Optional words to include (their letters are removed from the target)
+   - **Starter Words**: Words to include (their letters are removed from the target)
    - **Exclude Words**: Words to exclude from results
-   - **Exclude Parts of Speech**: Filter by POS tags (e.g., "n v adj")
-   - **Max Solutions**: Limit the number of solutions to find
 
-5. **Solve**: Click the "Solve" button to start finding solutions
+4. **Solve**: Click "Solve" to start finding solutions
+   - Results appear in real-time
+   - Search pauses automatically every 50 solutions
+   - Click "Resume" to continue or "Pause" to stop temporarily
 
-6. **Drag & Drop**: Reorder results by dragging and dropping to build sentences
+5. **Drag & Drop**: Reorder results by dragging and dropping to build sentences
+
+6. **Clear**: Reset all results and stats
 
 ### Command-line Interface
 
