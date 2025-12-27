@@ -1,23 +1,7 @@
 @font-face {
     font-family: 'Inter-Alia';
-    src: url('fonts/InterAlia-Regular.woff2') format('woff2');
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Inter-Alia';
-    src: url('fonts/InterAlia-Medium.woff2') format('woff2');
-    font-weight: 500;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Inter-Alia';
-    src: url('fonts/InterAlia-Bold.woff2') format('woff2');
-    font-weight: 700;
+    src: url('https://joro.io/fonts/InterAlia-VF.otf') format('opentype');
+    font-weight: 100 900;
     font-style: normal;
     font-display: swap;
 }
