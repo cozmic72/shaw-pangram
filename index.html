@@ -21,6 +21,7 @@
             <div id="menu-dropdown" class="menu-dropdown hidden">
                 <button id="menu-about" class="menu-item">About</button>
                 <button id="menu-solutions" class="menu-item">Saved Solutions</button>
+                <button id="menu-share" class="menu-item">Share Current State</button>
             </div>
         </header>
 
@@ -61,7 +62,7 @@
 
             <div class="control-group">
                 <label for="target-letters">
-                    <strong>Target Letters</strong>
+                    <strong>Target Word or Phrase</strong>
                     <span class="hint" id="target-letters-hint">(leave empty for all 48 Shavian letters, click to remove)</span>
                 </label>
                 <div
@@ -102,6 +103,10 @@
 
         <div class="results-section">
             <h2>Solutions: <span id="solution-count">0</span></h2>
+            <div id="exact-match-actions" class="exact-match-actions hidden">
+                <button id="save-exact-match" class="exact-match-btn">💾 Save</button>
+                <button id="share-exact-match" class="exact-match-btn">🔗 Share</button>
+            </div>
             <div id="results-container" class="results-container">
                 <div class="placeholder">Enter parameters and click "Solve" to begin</div>
             </div>
@@ -134,6 +139,9 @@
         const alphabetShavian = document.getElementById('alphabet-shavian');
         const alphabetRoman = document.getElementById('alphabet-roman');
         const targetLettersHint = document.getElementById('target-letters-hint');
+        const exactMatchActions = document.getElementById('exact-match-actions');
+        const saveExactMatchBtn = document.getElementById('save-exact-match');
+        const shareExactMatchBtn = document.getElementById('share-exact-match');
 
         // LocalStorage keys - get alphabet-specific keys
         function getStorageKeys(alphabet) {
@@ -150,6 +158,98 @@
         function getCurrentAlphabet() {
             return alphabetRoman.checked ? 'roman' : 'shavian';
         }
+
+        // Undo/Redo Manager
+        class UndoManager {
+            constructor() {
+                this.history = [];
+                this.currentIndex = -1;
+                this.maxHistory = 50; // Keep last 50 snapshots
+            }
+
+            takeSnapshot() {
+                // Create snapshot of current state
+                const snapshot = {
+                    alphabet: getCurrentAlphabet(),
+                    targetLetters: getTextContent(targetLetters, false),
+                    starterWords: getTextContent(starterWords, false),
+                    excludeWords: getTextContent(excludeWords, false)
+                };
+
+                // Remove any future history if we're not at the end
+                if (this.currentIndex < this.history.length - 1) {
+                    this.history = this.history.slice(0, this.currentIndex + 1);
+                }
+
+                // Add snapshot
+                this.history.push(snapshot);
+
+                // Limit history size
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                } else {
+                    this.currentIndex++;
+                }
+            }
+
+            canUndo() {
+                return this.currentIndex > 0;
+            }
+
+            canRedo() {
+                return this.currentIndex < this.history.length - 1;
+            }
+
+            undo() {
+                if (!this.canUndo()) return false;
+
+                this.currentIndex--;
+                this.restoreSnapshot(this.history[this.currentIndex]);
+                return true;
+            }
+
+            redo() {
+                if (!this.canRedo()) return false;
+
+                this.currentIndex++;
+                this.restoreSnapshot(this.history[this.currentIndex]);
+                return true;
+            }
+
+            restoreSnapshot(snapshot) {
+                // Restore alphabet if different
+                if (snapshot.alphabet !== getCurrentAlphabet()) {
+                    if (snapshot.alphabet === 'roman') {
+                        alphabetRoman.checked = true;
+                    } else {
+                        alphabetShavian.checked = true;
+                    }
+                    updateAlphabetHint();
+                }
+
+                // Restore fields
+                targetLetters.textContent = snapshot.targetLetters || '';
+                setTextContent(starterWords, snapshot.starterWords);
+                setTextContent(excludeWords, snapshot.excludeWords);
+
+                // Ensure editable spaces
+                ensureEditableSpace(targetLetters);
+                ensureEditableSpace(starterWords);
+                ensureEditableSpace(excludeWords);
+
+                // Validate
+                const availableLetters = getTextContent(targetLetters, false);
+                revalidateChips(starterWords, availableLetters);
+
+                // Save to localStorage
+                saveState();
+
+                // Trigger solve
+                checkAndTriggerSolve();
+            }
+        }
+
+        const undoManager = new UndoManager();
 
         // Extract punctuation from text
         function extractPunctuation(text) {
@@ -277,9 +377,7 @@
             words.forEach((word, index) => {
                 const chip = createChip(word);
                 element.appendChild(chip);
-                if (index < words.length - 1) {
-                    element.appendChild(document.createTextNode(' '));
-                }
+                // No spaces needed - CSS handles spacing between chips
             });
         }
 
@@ -311,10 +409,16 @@
             removeBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                undoManager.takeSnapshot();
                 const parent = chip.parentElement;
                 chip.remove();
                 if (parent) {
                     ensureEditableSpace(parent);
+                    // Revalidate if this is solve words
+                    if (parent === starterWords) {
+                        const availableLetters = getTextContent(targetLetters, false);
+                        revalidateChips(starterWords, availableLetters);
+                    }
                 }
                 saveState();
                 checkAndTriggerSolve();
@@ -345,32 +449,78 @@
             return chip;
         }
 
-        // Load saved state from localStorage for current alphabet
+        // Load saved state from localStorage or URL parameters
         function loadState() {
-            const savedAlphabet = localStorage.getItem(ALPHABET_KEY) || 'shavian';
+            // Check for URL parameters first (sharing)
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasUrlParams = urlParams.has('a') || urlParams.has('t') || urlParams.has('s') || urlParams.has('e') || urlParams.has('p');
+
+            let alphabet, targetText, starterText, excludeText;
+
+            if (hasUrlParams) {
+                // Load from URL params (shared state)
+                alphabet = urlParams.get('a') || 'shavian';
+
+                // Check for compact encoded format ('p' parameter for pangrams)
+                const encodedPangram = urlParams.get('p');
+                if (encodedPangram) {
+                    // Decode the compact pangram format
+                    starterText = decodeWords(encodedPangram, alphabet);
+                    targetText = '';
+                    excludeText = '';
+                } else {
+                    // Check for encoded anagram format ('t' and 's' parameters)
+                    const encodedTarget = urlParams.get('t');
+                    const encodedSolve = urlParams.get('s');
+
+                    if (encodedTarget || encodedSolve) {
+                        // Decode compact anagram format
+                        targetText = encodedTarget ? decodeWords(encodedTarget, alphabet) : '';
+                        starterText = encodedSolve ? decodeWords(encodedSolve, alphabet) : '';
+                        excludeText = '';
+                    } else {
+                        // Use legacy plain text format (backwards compatibility)
+                        targetText = urlParams.get('t') || '';
+                        starterText = urlParams.get('s') || '';
+                        excludeText = urlParams.get('e') || '';
+                    }
+                }
+
+                console.log('Loading state from URL:', { alphabet, targetText, starterText, excludeText });
+            } else {
+                // Load from localStorage (normal operation)
+                alphabet = localStorage.getItem(ALPHABET_KEY) || 'shavian';
+                const keys = getStorageKeys(alphabet);
+                targetText = localStorage.getItem(keys.targetLetters) || '';
+                starterText = localStorage.getItem(keys.starterWords) || '';
+                excludeText = localStorage.getItem(keys.excludeWords) || '';
+            }
 
             // Restore alphabet selection
-            if (savedAlphabet === 'roman') {
+            if (alphabet === 'roman') {
                 alphabetRoman.checked = true;
             } else {
                 alphabetShavian.checked = true;
             }
             updateAlphabetHint();
 
-            // Load alphabet-specific state
-            const keys = getStorageKeys(savedAlphabet);
-            const targetText = localStorage.getItem(keys.targetLetters) || '';
-            const starterText = localStorage.getItem(keys.starterWords) || '';
-            const excludeText = localStorage.getItem(keys.excludeWords) || '';
-
-            if (targetText) setTextContent(targetLetters, targetText, '');
+            // Target letters is plain text, not chips
+            if (targetText) {
+                targetLetters.textContent = targetText;
+            }
             if (starterText) setTextContent(starterWords, starterText);
             if (excludeText) setTextContent(excludeWords, excludeText);
 
-            // Validate loaded chips
+            // Validate loaded chips (only solve words need validation)
             const availableLetters = getTextContent(targetLetters, false);
             revalidateChips(starterWords, availableLetters);
-            revalidateChips(excludeWords, availableLetters);
+
+            // If loaded from URL, save to localStorage for this session
+            if (hasUrlParams) {
+                saveState();
+                // Clear URL params so refreshing doesn't reload shared state
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
         }
 
         // Save state to localStorage
@@ -409,16 +559,85 @@
 
             // Ensure element is focusable and clicking focuses the editable span
             element.addEventListener('click', (e) => {
-                ensureEditableSpace(element);
-                // If clicking on the element itself (not a chip or span), focus the editable span
+                // If clicking on the element itself, check if we're between chips or at the beginning
                 if (e.target === element) {
-                    const editableSpan = element.querySelector('.editable-span');
-                    if (editableSpan) {
-                        editableSpan.focus();
+                    // Get click position
+                    const clickX = e.clientX;
+
+                    // Find chips near the click
+                    const chips = element.querySelectorAll('.word-chip');
+
+                    // Check if clicking before the first chip
+                    if (chips.length > 0) {
+                        const firstChipRect = chips[0].getBoundingClientRect();
+                        if (clickX < firstChipRect.left) {
+                            const newSpan = document.createElement('span');
+                            newSpan.className = 'editable-span';
+                            newSpan.contentEditable = 'true';
+                            newSpan.textContent = '\u200B';
+                            element.insertBefore(newSpan, chips[0]);
+
+                            newSpan.focus();
+                            const range = document.createRange();
+                            const selection = window.getSelection();
+                            range.selectNodeContents(newSpan);
+                            range.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                            return;
+                        }
+                    }
+
+                    let insertAfterChip = null;
+
+                    for (let i = 0; i < chips.length; i++) {
+                        const chip = chips[i];
+                        const rect = chip.getBoundingClientRect();
+                        const nextChip = chips[i + 1];
+
+                        // Check if click is after this chip and before the next chip (or end)
+                        if (clickX > rect.right) {
+                            if (!nextChip || clickX < nextChip.getBoundingClientRect().left) {
+                                insertAfterChip = chip;
+                                break;
+                            }
+                        }
+                    }
+
+                    // If we found a position between chips (not at the end), insert editable span
+                    if (insertAfterChip && insertAfterChip !== chips[chips.length - 1]) {
+                        const newSpan = document.createElement('span');
+                        newSpan.className = 'editable-span';
+                        newSpan.contentEditable = 'true';
+                        newSpan.textContent = '\u200B'; // Zero-width space
+
+                        // Insert after the chip
+                        insertAfterChip.parentElement.insertBefore(newSpan, insertAfterChip.nextSibling);
+
+                        // Focus the new span
+                        newSpan.focus();
+                        const range = document.createRange();
+                        const selection = window.getSelection();
+                        range.selectNodeContents(newSpan);
+                        range.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        return; // Don't run default behavior
+                    }
+                }
+
+                ensureEditableSpace(element);
+
+                // If clicking on the element itself (not a chip or span), focus the editable span at the end
+                if (e.target === element) {
+                    const editableSpans = element.querySelectorAll('.editable-span');
+                    const lastEditableSpan = editableSpans[editableSpans.length - 1];
+                    if (lastEditableSpan) {
+                        lastEditableSpan.focus();
                         // Place caret at end of span
                         const range = document.createRange();
                         const selection = window.getSelection();
-                        range.selectNodeContents(editableSpan);
+                        range.selectNodeContents(lastEditableSpan);
                         range.collapse(false);
                         selection.removeAllRanges();
                         selection.addRange(range);
@@ -427,8 +646,10 @@
             });
 
             element.addEventListener('keydown', (e) => {
-                // Convert text to chip on space, comma, or Enter
-                if (e.key === ' ' || e.key === ',' || e.key === 'Enter') {
+                // Check if typing punctuation in an empty editable span - append to last chip
+                // Use Unicode property to match any punctuation character
+                const isPunctuation = e.key.length === 1 && /^\p{P}$/u.test(e.key);
+                if (isPunctuation) {
                     const selection = window.getSelection();
                     if (selection.rangeCount === 0) return;
 
@@ -440,41 +661,169 @@
                         container = container.parentElement;
                     }
 
-                    // Check if we're in an editable span
+                    // Check if we're in an editable span with no text
                     if (container.classList && container.classList.contains('editable-span')) {
                         const text = container.textContent.replace(/\u200B/g, '').trim();
-                        if (!text) return; // Don't create empty chips
+                        if (!text) {
+                            // Find the last chip before this editable span
+                            let prevSibling = container.previousSibling;
+                            while (prevSibling && !prevSibling.classList?.contains('word-chip')) {
+                                prevSibling = prevSibling.previousSibling;
+                            }
+
+                            if (prevSibling && prevSibling.classList.contains('word-chip')) {
+                                e.preventDefault();
+                                // Append punctuation to the last chip
+                                const lastChip = prevSibling;
+                                const oldText = lastChip.dataset.text || '';
+                                const newText = oldText + e.key;
+                                lastChip.dataset.text = newText;
+
+                                // Update the chip's text content
+                                const textSpan = lastChip.querySelector('.chip-text');
+                                if (textSpan) {
+                                    textSpan.textContent = newText;
+                                }
+
+                                // Revalidate if this is solve words
+                                if (element === starterWords) {
+                                    const availableLetters = getTextContent(targetLetters, false);
+                                    revalidateChips(starterWords, availableLetters);
+                                }
+
+                                saveState();
+                                checkAndTriggerSolve();
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // Convert text to chip on space, comma, or Enter
+                if (e.key === ' ' || e.key === ',' || e.key === 'Enter') {
+                    const selection = window.getSelection();
+                    if (selection.rangeCount === 0) return;
+
+                    const range = selection.getRangeAt(0);
+                    let container = range.startContainer;
+                    let cursorPos = range.startOffset;
+
+                    // If we're in a text node inside an editable span, get the span
+                    if (container.nodeType === Node.TEXT_NODE && container.parentElement.classList.contains('editable-span')) {
+                        // Keep the cursor position relative to the text node
+                        container = container.parentElement;
+                    } else if (container.classList && container.classList.contains('editable-span')) {
+                        // If directly in the span, cursor position is relative to child nodes
+                        // Get actual text position
+                        let textPos = 0;
+                        for (let i = 0; i < cursorPos; i++) {
+                            const child = container.childNodes[i];
+                            if (child.nodeType === Node.TEXT_NODE) {
+                                textPos += child.textContent.length;
+                            }
+                        }
+                        cursorPos = textPos;
+                    }
+
+                    // Check if we're in an editable span
+                    if (container.classList && container.classList.contains('editable-span')) {
+                        const fullText = container.textContent.replace(/\u200B/g, '');
 
                         e.preventDefault();
 
-                        // Validate the chip (only for starter/exclude words, not target letters)
-                        let error = null;
-                        if (element === starterWords || element === excludeWords) {
-                            const availableLetters = getTextContent(targetLetters, false);
-                            error = validateWord(text, availableLetters, element);
+                        // Take snapshot before creating chips
+                        if (fullText.trim()) {
+                            undoManager.takeSnapshot();
                         }
 
-                        const chip = createChip(text, true, error);
+                        // Split text at cursor position
+                        const beforeCursor = fullText.substring(0, cursorPos).trim();
+                        const afterCursor = fullText.substring(cursorPos).trim();
 
-                        // Replace editable span with chip
-                        element.insertBefore(chip, container);
+                        console.log('[Space] Creating chips from:', { fullText, beforeCursor, afterCursor, cursorPos });
+
+                        // Skip if both parts are empty or only punctuation
+                        if (!beforeCursor && !afterCursor) {
+                            console.log('[Space] Both parts empty, skipping');
+                            return;
+                        }
+
+                        // Remove the current editable span first
+                        const insertPosition = container.nextSibling;
                         container.remove();
 
-                        // Ensure there's a new editable space after the chip
+                        let lastInserted = null;
+
+                        // Create chip for text before cursor if it exists and not just punctuation
+                        if (beforeCursor && /[\p{L}\p{N}]/u.test(beforeCursor)) {
+                            console.log('[Space] Creating chip for beforeCursor:', beforeCursor);
+                            let error = null;
+                            if (element === starterWords) {
+                                const availableLetters = getTextContent(targetLetters, false);
+                                error = validateWord(beforeCursor, availableLetters, element);
+                            }
+                            const chip = createChip(beforeCursor, true, error);
+                            if (insertPosition) {
+                                element.insertBefore(chip, insertPosition);
+                            } else {
+                                element.appendChild(chip);
+                            }
+                            lastInserted = chip;
+                        }
+
+                        // Create chip for text after cursor if it exists and not just punctuation
+                        if (afterCursor && /[\p{L}\p{N}]/u.test(afterCursor)) {
+                            console.log('[Space] Creating chip for afterCursor:', afterCursor);
+                            let error = null;
+                            if (element === starterWords) {
+                                const availableLetters = getTextContent(targetLetters, false);
+                                error = validateWord(afterCursor, availableLetters, element);
+                            }
+                            const chip = createChip(afterCursor, true, error);
+                            if (lastInserted) {
+                                element.insertBefore(chip, lastInserted.nextSibling);
+                            } else if (insertPosition) {
+                                element.insertBefore(chip, insertPosition);
+                            } else {
+                                element.appendChild(chip);
+                            }
+                            lastInserted = chip;
+                        } else if (afterCursor) {
+                            console.log('[Space] Skipping afterCursor (punctuation only):', afterCursor);
+                        }
+
+                        // Create new empty editable span after all chips
+                        const newSpan = document.createElement('span');
+                        newSpan.className = 'editable-span';
+                        newSpan.contentEditable = 'true';
+                        newSpan.textContent = '\u200B';
+
+                        if (lastInserted) {
+                            element.insertBefore(newSpan, lastInserted.nextSibling);
+                        } else if (insertPosition) {
+                            element.insertBefore(newSpan, insertPosition);
+                        } else {
+                            element.appendChild(newSpan);
+                        }
+
+                        // Ensure there's also one at the end
                         ensureEditableSpace(element);
 
-                        // Focus the new editable span
-                        const newSpan = element.lastChild;
-                        if (newSpan && newSpan.classList && newSpan.classList.contains('editable-span')) {
-                            newSpan.focus();
-                        }
+                        // Focus the new editable span right after the chip
+                        newSpan.focus();
+                        const range = document.createRange();
+                        const sel = window.getSelection();
+                        range.setStart(newSpan, 0);
+                        range.collapse(true);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
 
                         saveState();
                         checkAndTriggerSolve();
                     }
                 }
 
-                // Handle backspace to remove chips
+                // Handle backspace to convert chip back to editable span
                 if (e.key === 'Backspace') {
                     const selection = window.getSelection();
                     if (selection.rangeCount === 0) return;
@@ -494,9 +843,210 @@
                             const prevSibling = container.previousSibling;
                             if (prevSibling && prevSibling.classList && prevSibling.classList.contains('word-chip')) {
                                 e.preventDefault();
+
+                                // Get the chip's text and convert it back to editable span
+                                const chipText = prevSibling.dataset.text || '';
+
+                                // Create new editable span with the chip's text minus last character
+                                // Use Array.from to properly handle multi-byte Unicode characters
+                                const chars = Array.from(chipText);
+                                const newText = chars.slice(0, -1).join('');
+                                const newSpan = document.createElement('span');
+                                newSpan.className = 'editable-span';
+                                newSpan.contentEditable = 'true';
+                                newSpan.textContent = newText || '\u200B';
+
+                                // Replace the chip with the new editable span
+                                element.insertBefore(newSpan, prevSibling);
                                 prevSibling.remove();
+
+                                // Remove the current empty editable span (the one we were in)
+                                container.remove();
+
+                                // Ensure there's still an editable span at the end
+                                ensureEditableSpace(element);
+
+                                // Focus at the end of the new span
+                                newSpan.focus();
+                                const newRange = document.createRange();
+                                const sel = window.getSelection();
+                                newRange.selectNodeContents(newSpan);
+                                newRange.collapse(false);
+                                sel.removeAllRanges();
+                                sel.addRange(newRange);
+
+                                // Revalidate if this is solve words
+                                if (element === starterWords) {
+                                    const availableLetters = getTextContent(targetLetters, false);
+                                    revalidateChips(starterWords, availableLetters);
+                                }
+
                                 saveState();
                                 checkAndTriggerSolve();
+                            }
+                        }
+                    }
+                }
+
+                // Handle arrow keys to navigate between editable spans
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    const selection = window.getSelection();
+                    if (selection.rangeCount === 0) return;
+
+                    const range = selection.getRangeAt(0);
+                    let container = range.startContainer;
+
+                    // If we're in a text node, get the parent
+                    if (container.nodeType === Node.TEXT_NODE) {
+                        container = container.parentElement;
+                    }
+
+                    // Check if we're in an editable span
+                    if (container.classList && container.classList.contains('editable-span')) {
+                        const text = container.textContent.replace(/\u200B/g, '');
+                        const cursorPos = range.startOffset;
+
+                        // Arrow left at the beginning of span - jump to previous editable span or chip
+                        if (e.key === 'ArrowLeft' && cursorPos === 0) {
+                            let prev = container.previousSibling;
+
+                            // Skip whitespace text nodes
+                            while (prev && prev.nodeType === Node.TEXT_NODE) {
+                                prev = prev.previousSibling;
+                            }
+
+                            if (prev) {
+                                e.preventDefault();
+                                if (prev.classList.contains('editable-span')) {
+                                    // Jump to previous editable span
+                                    prev.focus();
+                                    const newRange = document.createRange();
+                                    const sel = window.getSelection();
+                                    newRange.selectNodeContents(prev);
+                                    newRange.collapse(false); // End of span
+                                    sel.removeAllRanges();
+                                    sel.addRange(newRange);
+                                } else if (prev.classList.contains('word-chip')) {
+                                    // Convert current span to chip if it has text with letters/numbers
+                                    const trimmedText = text.trim();
+                                    if (trimmedText && /[\p{L}\p{N}]/u.test(trimmedText)) {
+                                        console.log('[ArrowLeft] Creating chip for text:', trimmedText);
+                                        let error = null;
+                                        if (element === starterWords) {
+                                            const availableLetters = getTextContent(targetLetters, false);
+                                            error = validateWord(trimmedText, availableLetters, element);
+                                        }
+                                        const chip = createChip(trimmedText, true, error);
+                                        element.insertBefore(chip, container);
+                                        container.remove();
+                                    } else {
+                                        if (trimmedText) {
+                                            console.log('[ArrowLeft] Skipping chip creation (punctuation only):', trimmedText);
+                                        }
+                                        container.remove();
+                                    }
+
+                                    // Convert previous chip to editable span
+                                    const chipText = prev.dataset.text || '';
+                                    const newSpan = document.createElement('span');
+                                    newSpan.className = 'editable-span';
+                                    newSpan.contentEditable = 'true';
+                                    newSpan.textContent = chipText;
+
+                                    element.insertBefore(newSpan, prev);
+                                    prev.remove();
+
+                                    ensureEditableSpace(element);
+
+                                    // Focus at end of new span
+                                    newSpan.focus();
+                                    const newRange = document.createRange();
+                                    const sel = window.getSelection();
+                                    newRange.selectNodeContents(newSpan);
+                                    newRange.collapse(false);
+                                    sel.removeAllRanges();
+                                    sel.addRange(newRange);
+
+                                    if (element === starterWords) {
+                                        const availableLetters = getTextContent(targetLetters, false);
+                                        revalidateChips(starterWords, availableLetters);
+                                    }
+
+                                    saveState();
+                                    checkAndTriggerSolve();
+                                }
+                            }
+                        }
+
+                        // Arrow right at the end of span - jump to next editable span or chip
+                        if (e.key === 'ArrowRight' && cursorPos >= text.length) {
+                            let next = container.nextSibling;
+
+                            // Skip whitespace text nodes
+                            while (next && next.nodeType === Node.TEXT_NODE) {
+                                next = next.nextSibling;
+                            }
+
+                            if (next) {
+                                e.preventDefault();
+                                if (next.classList.contains('editable-span')) {
+                                    // Jump to next editable span
+                                    next.focus();
+                                    const newRange = document.createRange();
+                                    const sel = window.getSelection();
+                                    newRange.selectNodeContents(next);
+                                    newRange.collapse(true); // Start of span
+                                    sel.removeAllRanges();
+                                    sel.addRange(newRange);
+                                } else if (next.classList.contains('word-chip')) {
+                                    // Convert current span to chip if it has text with letters/numbers
+                                    const trimmedText = text.trim();
+                                    if (trimmedText && /[\p{L}\p{N}]/u.test(trimmedText)) {
+                                        console.log('[ArrowRight] Creating chip for text:', trimmedText);
+                                        let error = null;
+                                        if (element === starterWords) {
+                                            const availableLetters = getTextContent(targetLetters, false);
+                                            error = validateWord(trimmedText, availableLetters, element);
+                                        }
+                                        const chip = createChip(trimmedText, true, error);
+                                        element.insertBefore(chip, container);
+                                        container.remove();
+                                    } else {
+                                        if (trimmedText) {
+                                            console.log('[ArrowRight] Skipping chip creation (punctuation only):', trimmedText);
+                                        }
+                                        container.remove();
+                                    }
+
+                                    // Convert next chip to editable span
+                                    const chipText = next.dataset.text || '';
+                                    const newSpan = document.createElement('span');
+                                    newSpan.className = 'editable-span';
+                                    newSpan.contentEditable = 'true';
+                                    newSpan.textContent = chipText;
+
+                                    element.insertBefore(newSpan, next);
+                                    next.remove();
+
+                                    ensureEditableSpace(element);
+
+                                    // Focus at start of new span
+                                    newSpan.focus();
+                                    const newRange = document.createRange();
+                                    const sel = window.getSelection();
+                                    newRange.selectNodeContents(newSpan);
+                                    newRange.collapse(true);
+                                    sel.removeAllRanges();
+                                    sel.addRange(newRange);
+
+                                    if (element === starterWords) {
+                                        const availableLetters = getTextContent(targetLetters, false);
+                                        revalidateChips(starterWords, availableLetters);
+                                    }
+
+                                    saveState();
+                                    checkAndTriggerSolve();
+                                }
                             }
                         }
                     }
@@ -517,14 +1067,20 @@
                     if (text) {
                         const words = text.split(separator).filter(w => w);
                         words.forEach(word => {
-                            // Validate chip
-                            let error = null;
-                            if (element === starterWords || element === excludeWords) {
-                                const availableLetters = getTextContent(targetLetters, false);
-                                error = validateWord(word, availableLetters, element);
+                            // Only create chip if word contains letters or numbers (not just punctuation)
+                            if (/[\p{L}\p{N}]/u.test(word)) {
+                                console.log('[Blur] Creating chip for word:', word);
+                                // Validate chip (only for solve words)
+                                let error = null;
+                                if (element === starterWords) {
+                                    const availableLetters = getTextContent(targetLetters, false);
+                                    error = validateWord(word, availableLetters, element);
+                                }
+                                const chip = createChip(word, true, error);
+                                element.insertBefore(chip, span);
+                            } else {
+                                console.log('[Blur] Skipping word (punctuation only):', word);
                             }
-                            const chip = createChip(word, true, error);
-                            element.insertBefore(chip, span);
                         });
                         span.textContent = '\u200B'; // Reset span
                     }
@@ -552,10 +1108,11 @@
                 if (draggingElement && draggingElement.classList.contains('word-chip')) {
                     // Show where it will be inserted
                     if (afterElement == null) {
-                        // Append at the end (before editable span)
-                        const editableSpan = element.querySelector('.editable-span');
-                        if (editableSpan) {
-                            element.insertBefore(draggingElement, editableSpan);
+                        // Append at the end (before the last editable span)
+                        const editableSpans = element.querySelectorAll('.editable-span');
+                        const lastEditableSpan = editableSpans[editableSpans.length - 1];
+                        if (lastEditableSpan) {
+                            element.insertBefore(draggingElement, lastEditableSpan);
                         }
                     } else {
                         element.insertBefore(draggingElement, afterElement);
@@ -588,9 +1145,9 @@
                     saveState();
                     checkAndTriggerSolve();
                 } else if (word && !existingChip) {
-                    // New chip from elsewhere - validate it
+                    // New chip from elsewhere - validate it (only for solve words)
                     let error = null;
-                    if (element === starterWords || element === excludeWords) {
+                    if (element === starterWords) {
                         const availableLetters = getTextContent(targetLetters, false);
                         error = validateWord(word, availableLetters, element);
                     }
@@ -599,9 +1156,11 @@
                     const chip = createChip(word, true, error);
 
                     if (afterElement == null) {
-                        const editableSpan = element.querySelector('.editable-span');
-                        if (editableSpan) {
-                            element.insertBefore(chip, editableSpan);
+                        // Insert before the last editable span
+                        const editableSpans = element.querySelectorAll('.editable-span');
+                        const lastEditableSpan = editableSpans[editableSpans.length - 1];
+                        if (lastEditableSpan) {
+                            element.insertBefore(chip, lastEditableSpan);
                         } else {
                             element.appendChild(chip);
                         }
@@ -637,6 +1196,10 @@
         setupEditableInput(starterWords);
         setupEditableInput(excludeWords);
 
+        // Web Worker for background solving
+        let solverWorker = null;
+        let workerReady = false;
+
         // Auto-load dictionary on page load
         (async function loadDictionary() {
             try {
@@ -645,13 +1208,70 @@
                     throw new Error(`Failed to load: ${response.statusText}`);
                 }
                 const data = await response.json();
+
+                // Initialize main thread solver (for fallback)
                 solver = new PangramSolver(data);
 
-                // Load saved state after dictionary is loaded
-                loadState();
+                // Initialize Web Worker
+                solverWorker = new Worker('pangram-worker.js');
 
-                // Trigger initial solve
-                triggerSolve();
+                // Setup worker message handlers
+                function setupWorkerHandlers() {
+                    solverWorker.onmessage = function(e) {
+                    const { type, data: msgData } = e.data;
+
+                    if (type === 'ready') {
+                        workerReady = true;
+                        console.log('[Worker] Initialized and ready');
+
+                        // Load saved state after dictionary is loaded
+                        loadState();
+
+                        // Trigger initial solve
+                        triggerSolve();
+                    } else if (type === 'solution') {
+                        // Solution found in worker
+                        const { solution, count } = msgData;
+                        allSolutions.push(solution);
+
+                        // Check if this is an exact match
+                        const hasExactMatch = currentParams && currentParams.letters === '';
+
+                        // For regular searches, display immediately
+                        // For exact matches, wait for finishBatch to display prominently
+                        if (!hasExactMatch) {
+                            displaySolution(solution, allSolutions.length - 1);
+                        }
+
+                        // Update count
+                        totalSolutionsFound = allSolutions.length;
+                        if (hasExactMatch) {
+                            solutionCountEl.textContent = `${totalSolutionsFound} (exact match!)`;
+                        } else {
+                            solutionCountEl.textContent = `>${totalSolutionsFound}`;
+                        }
+                    } else if (type === 'complete') {
+                        console.log('[Worker] Search complete, found', msgData.totalSolutions, 'solutions');
+                        finishBatch(msgData.totalSolutions);
+                    } else if (type === 'error') {
+                        console.error('[Worker] Error:', msgData.error);
+                        finishBatch(0);
+                    }
+                };
+
+                    solverWorker.onerror = function(err) {
+                        console.error('[Worker] Unexpected error:', err);
+                        workerReady = false;
+                    };
+                }
+
+                setupWorkerHandlers();
+
+                // Send dictionary to worker
+                solverWorker.postMessage({
+                    type: 'init',
+                    data: { dictionary: data }
+                });
             } catch (err) {
                 console.error('Error loading dictionary:', err);
                 alert(`Error loading dictionary: ${err.message}`);
@@ -676,11 +1296,35 @@
         }
 
         function startFreshSearch() {
+            // Terminate any existing worker search
+            if (solverWorker && workerReady && isLoadingMore) {
+                console.log('[Worker] Terminating previous search');
+                solverWorker.terminate();
+
+                // Recreate worker
+                solverWorker = new Worker('pangram-worker.js');
+                workerReady = false;
+
+                // Re-setup message handlers
+                setupWorkerHandlers();
+
+                // Re-initialize with dictionary data
+                fetch('readlex/readlex.json')
+                    .then(r => r.json())
+                    .then(data => {
+                        solverWorker.postMessage({
+                            type: 'init',
+                            data: { dictionary: data }
+                        });
+                    });
+            }
+
             // Start fresh
             allSolutions = [];
             displayedCount = 0;
             totalSolutionsFound = 0;
             resultsContainer.innerHTML = '';
+            isLoadingMore = false;
 
             // Show searching state (don't show 0)
             solutionCountEl.textContent = '...';
@@ -710,6 +1354,11 @@
             // Remove all whitespace from letters
             if (letters) {
                 letters = letters.replace(/\s+/g, '');
+            }
+
+            // If no target letters specified, use null to signal "use all letters"
+            if (!letters && !starters) {
+                letters = null;
             }
 
             // Process starter words
@@ -785,13 +1434,20 @@
 
         // Switch alphabet - save current state and load new alphabet's state
         function switchAlphabet() {
-            // Save current state before switching
-            saveState();
+            // Get the OLD alphabet before the radio button changed
+            const oldAlphabet = alphabetRoman.checked ? 'shavian' : 'roman';
+
+            // Save state for OLD alphabet
+            const oldKeys = getStorageKeys(oldAlphabet);
+            localStorage.setItem(oldKeys.targetLetters, getTextContent(targetLetters));
+            localStorage.setItem(oldKeys.starterWords, getTextContent(starterWords));
+            localStorage.setItem(oldKeys.excludeWords, getTextContent(excludeWords));
+            localStorage.setItem(ALPHABET_KEY, getCurrentAlphabet());
 
             // Update hint
             updateAlphabetHint();
 
-            // Load state for new alphabet
+            // Load state for NEW alphabet
             const newAlphabet = getCurrentAlphabet();
             const keys = getStorageKeys(newAlphabet);
             const targetText = localStorage.getItem(keys.targetLetters) || '';
@@ -804,7 +1460,10 @@
             excludeWords.innerHTML = '';
 
             // Load saved state for new alphabet
-            if (targetText) setTextContent(targetLetters, targetText, '');
+            // Target letters is plain text, not chips
+            if (targetText) {
+                targetLetters.textContent = targetText;
+            }
             if (starterText) setTextContent(starterWords, starterText);
             if (excludeText) setTextContent(excludeWords, excludeText);
 
@@ -813,10 +1472,9 @@
             ensureEditableSpace(starterWords);
             ensureEditableSpace(excludeWords);
 
-            // Validate and solve
+            // Validate and solve (only solve words need validation)
             const availableLetters = getTextContent(targetLetters, false);
             revalidateChips(starterWords, availableLetters);
-            revalidateChips(excludeWords, availableLetters);
 
             triggerSolve();
         }
@@ -830,7 +1488,19 @@
         excludeWords.addEventListener('input', triggerSolve);
 
         function runBatch(skipCount) {
-            if (!solver || !currentParams || isLoadingMore) {
+            if (!currentParams) {
+                return;
+            }
+
+            if (!workerReady) {
+                console.log('[Worker] Not ready yet, waiting...');
+                // Retry after worker is ready
+                setTimeout(() => runBatch(skipCount), 100);
+                return;
+            }
+
+            if (isLoadingMore) {
+                console.log('[Worker] Already searching, ignoring request');
                 return;
             }
 
@@ -841,60 +1511,30 @@
                 loadingIndicator.style.display = 'block';
             }
 
-            // Set up solution callback
-            solver.onSolution = (solution, count) => {
-                allSolutions.push(solution);
+            // Pass the letters as-is. Empty string means no letters left (exact match).
+            // null means use all letters for the current alphabet.
+            const lettersToSolve = currentParams.letters === '' ? '' : currentParams.letters;
 
-                // Display new solution immediately
-                if (displayedCount < allSolutions.length) {
-                    displayNextBatch();
+            console.log('[Worker] Starting search:', {
+                letters: lettersToSolve ? lettersToSolve.substring(0, 20) + '...' : 'all',
+                letterCount: lettersToSolve ? lettersToSolve.length : 'all',
+                skipCount,
+                maxSolutions: BATCH_SIZE,
+                alphabet: currentParams.alphabet
+            });
+
+            // Send solve request to worker
+            solverWorker.postMessage({
+                type: 'solve',
+                data: {
+                    targetLetters: lettersToSolve,
+                    maxSolutions: BATCH_SIZE,
+                    excludeWords: currentParams.excludeWordsSet,
+                    excludePos: new Set(),
+                    skipSolutions: skipCount,
+                    alphabet: currentParams.alphabet
                 }
-            };
-
-
-            // Run solver asynchronously
-            setTimeout(() => {
-                try {
-                    // Pass the letters as-is. Empty string means no letters left (exact match).
-                    // null means use all 48 Shavian letters.
-                    const lettersToSolve = currentParams.letters === '' ? '' : (currentParams.letters || null);
-
-                    console.log('Calling solver with:', {
-                        letters: lettersToSolve,
-                        lettersLength: lettersToSolve ? lettersToSolve.length : null,
-                        skipCount
-                    });
-
-                    const newSolutions = solver.solvePangram(
-                        lettersToSolve,
-                        BATCH_SIZE,
-                        currentParams.excludeWordsSet,
-                        new Set(),
-                        skipCount,
-                        currentParams.alphabet
-                    );
-
-                    console.log('Solver returned:', newSolutions.length, 'solutions');
-                    console.log('allSolutions has:', allSolutions.length, 'solutions');
-
-                    // If callback wasn't called (e.g. exact match early return), add solutions manually
-                    if (allSolutions.length === 0 && newSolutions.length > 0) {
-                        allSolutions.push(...newSolutions);
-                    }
-
-                    totalSolutionsFound = skipCount + newSolutions.length;
-
-                    // Display the batch
-                    if (displayedCount < allSolutions.length) {
-                        displayNextBatch();
-                    }
-
-                    finishBatch(newSolutions.length);
-                } catch (err) {
-                    console.error('Solver error:', err);
-                    finishBatch(0);
-                }
-            }, 10);
+            });
         }
 
         let isLoadingMore = false;
@@ -910,8 +1550,22 @@
             // So stop after first batch even if we found BATCH_SIZE solutions
             if (hasExactMatch) {
                 hasMoreSolutions = false;
+                // Show exact match actions
+                exactMatchActions.classList.remove('hidden');
+                // Update save button state
+                updateSaveButtonState();
+
+                // Display the exact match prominently
+                // Get starter words WITH punctuation preserved
+                const startersWithPunctuation = getTextContent(starterWords, false).trim().split(/[\s,]+/).filter(w => w);
+
+                // Display as single prominent solution
+                resultsContainer.innerHTML = '';
+                displayExactMatch(startersWithPunctuation);
             } else {
                 hasMoreSolutions = foundCount === BATCH_SIZE;
+                // Hide exact match actions
+                exactMatchActions.classList.add('hidden');
             }
 
             // Hide loading indicator
@@ -928,6 +1582,7 @@
                 resultsContainer.innerHTML = '<div class="no-results">No solutions found</div>';
                 currentParams = null; // Reset
                 solutionCountEl.textContent = '0';
+                exactMatchActions.classList.add('hidden');
             } else if (foundCount < BATCH_SIZE) {
                 // Found fewer than batch size, no more solutions
                 if (foundCount === 0) {
@@ -941,77 +1596,126 @@
         }
 
 
-        function displayNextBatch() {
-            const fragment = document.createDocumentFragment();
-            const end = Math.min(displayedCount + BATCH_SIZE, allSolutions.length);
-
-            console.log('displayNextBatch:', displayedCount, 'to', end, 'of', allSolutions.length);
-
+        function displayExactMatch(allWords) {
             // Remove placeholder if it exists
             const placeholder = resultsContainer.querySelector('.placeholder');
             if (placeholder) {
                 placeholder.remove();
             }
 
-            for (let i = displayedCount; i < end; i++) {
-                const solution = allSolutions[i];
-                console.log('Solution', i, ':', solution);
-                const div = document.createElement('div');
-                div.className = 'result-item';
-                div.dataset.index = i;
+            const div = document.createElement('div');
+            div.className = 'result-item exact-match';
 
-                // Add result number
-                const numberSpan = document.createElement('span');
-                numberSpan.className = 'result-number';
-                numberSpan.textContent = `${i + 1}.`;
-                div.appendChild(numberSpan);
+            // Add result text with draggable words
+            const textSpan = document.createElement('span');
+            textSpan.className = 'result-text';
 
-                // Add result text with draggable words
-                const textSpan = document.createElement('span');
-                textSpan.className = 'result-text';
+            // All words are starter words for exact match (they use all letters)
+            allWords.forEach((word, wordIndex) => {
+                const wordSpan = document.createElement('span');
+                wordSpan.className = 'draggable-word starter-word';
 
-                // Get starter words WITH punctuation preserved
-                const startersWithPunctuation = getTextContent(starterWords, false).trim().split(/[\s,]+/).filter(w => w);
+                wordSpan.textContent = word;
+                wordSpan.draggable = true;
+                wordSpan.dataset.word = word;
 
-                // Combine starter words (with punctuation) + solution
-                const allWords = [...startersWithPunctuation, ...solution];
+                // Add drag event listeners to individual words
+                wordSpan.addEventListener('dragstart', handleWordDragStart);
+                wordSpan.addEventListener('dragend', handleWordDragEnd);
 
-                // For exact match (empty solution), show a message if no starter words
-                if (allWords.length === 0) {
-                    textSpan.textContent = '(empty solution)';
-                }
-
-                allWords.forEach((word, wordIndex) => {
-                    const wordSpan = document.createElement('span');
-                    wordSpan.className = 'draggable-word';
-
-                    // Mark starter words differently
-                    if (wordIndex < startersWithPunctuation.length) {
-                        wordSpan.classList.add('starter-word');
-                    }
-
-                    wordSpan.textContent = word;
-                    wordSpan.draggable = true;
-                    wordSpan.dataset.word = word;
-
-                    // Add drag event listeners to individual words
-                    wordSpan.addEventListener('dragstart', handleWordDragStart);
-                    wordSpan.addEventListener('dragend', handleWordDragEnd);
-
-                    textSpan.appendChild(wordSpan);
-
-                    // Add space between words (except for last word)
-                    if (wordIndex < allWords.length - 1) {
-                        textSpan.appendChild(document.createTextNode(' '));
-                    }
+                // Double-click to add to solve words
+                wordSpan.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    addWordToSolveWords(word);
                 });
 
-                div.appendChild(textSpan);
-                fragment.appendChild(div);
+                textSpan.appendChild(wordSpan);
+
+                // Add space between words (except for last word)
+                if (wordIndex < allWords.length - 1) {
+                    textSpan.appendChild(document.createTextNode(' '));
+                }
+            });
+
+            div.appendChild(textSpan);
+            resultsContainer.appendChild(div);
+            displayedCount++;
+        }
+
+        function displaySolution(solution, index) {
+            // Remove placeholder if it exists
+            const placeholder = resultsContainer.querySelector('.placeholder');
+            if (placeholder) {
+                placeholder.remove();
             }
 
-            resultsContainer.appendChild(fragment);
-            displayedCount = end;
+            const div = document.createElement('div');
+            div.className = 'result-item';
+            div.dataset.index = index;
+
+            // Add result number
+            const numberSpan = document.createElement('span');
+            numberSpan.className = 'result-number';
+            numberSpan.textContent = `${index + 1}.`;
+            div.appendChild(numberSpan);
+
+            // Add result text with draggable words
+            const textSpan = document.createElement('span');
+            textSpan.className = 'result-text';
+
+            // Get starter words WITH punctuation preserved
+            const startersWithPunctuation = getTextContent(starterWords, false).trim().split(/[\s,]+/).filter(w => w);
+
+            // Combine starter words (with punctuation) + solution
+            const allWords = [...startersWithPunctuation, ...solution];
+
+            // For exact match (empty solution), show a message if no starter words
+            if (allWords.length === 0) {
+                textSpan.textContent = '(empty solution)';
+            }
+
+            allWords.forEach((word, wordIndex) => {
+                const wordSpan = document.createElement('span');
+                wordSpan.className = 'draggable-word';
+
+                // Mark starter words differently
+                if (wordIndex < startersWithPunctuation.length) {
+                    wordSpan.classList.add('starter-word');
+                }
+
+                wordSpan.textContent = word;
+                wordSpan.draggable = true;
+                wordSpan.dataset.word = word;
+
+                // Add drag event listeners to individual words
+                wordSpan.addEventListener('dragstart', handleWordDragStart);
+                wordSpan.addEventListener('dragend', handleWordDragEnd);
+
+                // Double-click to add to solve words
+                wordSpan.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    addWordToSolveWords(word);
+                });
+
+                textSpan.appendChild(wordSpan);
+
+                // Add space between words (except for last word)
+                if (wordIndex < allWords.length - 1) {
+                    textSpan.appendChild(document.createTextNode(' '));
+                }
+            });
+
+            div.appendChild(textSpan);
+            resultsContainer.appendChild(div);
+            displayedCount++;
+        }
+
+        function displayNextBatch() {
+            const end = Math.min(displayedCount + BATCH_SIZE, allSolutions.length);
+
+            for (let i = displayedCount; i < end; i++) {
+                displaySolution(allSolutions[i], i);
+            }
         }
 
         // Drag and drop functionality for individual words in results
@@ -1029,6 +1733,45 @@
         function handleWordDragEnd(e) {
             this.classList.remove('dragging');
             console.log('[Drag] Result word end:', draggedWord);
+        }
+
+        // Add word to solve words
+        function addWordToSolveWords(word) {
+            // Check if word already exists
+            const existingChips = starterWords.querySelectorAll('.word-chip');
+            const { core: wordCore } = extractPunctuation(word);
+
+            for (const chip of existingChips) {
+                const chipText = chip.dataset.text || '';
+                const { core: chipCore } = extractPunctuation(chipText);
+                if (chipCore === wordCore) {
+                    // Already exists, flash it
+                    chip.style.background = '#667eea';
+                    chip.style.color = 'white';
+                    setTimeout(() => {
+                        chip.style.background = '';
+                        chip.style.color = '';
+                    }, 300);
+                    return;
+                }
+            }
+
+            // Add new chip at the end (before the last editable span)
+            const availableLetters = getTextContent(targetLetters, false);
+            const error = validateWord(word, availableLetters, starterWords);
+            const chip = createChip(word, true, error);
+
+            const editableSpans = starterWords.querySelectorAll('.editable-span');
+            const lastEditableSpan = editableSpans[editableSpans.length - 1];
+            if (lastEditableSpan) {
+                starterWords.insertBefore(chip, lastEditableSpan);
+            } else {
+                starterWords.appendChild(chip);
+                ensureEditableSpace(starterWords);
+            }
+
+            saveState();
+            checkAndTriggerSolve();
         }
 
         // Track previous values for change detection
@@ -1093,9 +1836,9 @@
 
                 // If target letters changed, revalidate starter words
                 if (currentValues.targetLetters !== previousValues.targetLetters) {
+                    // Revalidate solve words when target letters change
                     const availableLetters = getTextContent(targetLetters, false);
                     revalidateChips(starterWords, availableLetters);
-                    revalidateChips(excludeWords, availableLetters);
                 }
 
                 previousValues = currentValues;
@@ -1133,6 +1876,7 @@
         const menuDropdown = document.getElementById('menu-dropdown');
         const menuAbout = document.getElementById('menu-about');
         const menuSolutions = document.getElementById('menu-solutions');
+        const menuShare = document.getElementById('menu-share');
         const aboutDialog = document.getElementById('about-dialog');
         const solutionsDialog = document.getElementById('solutions-dialog');
         const aboutContent = document.getElementById('about-content');
@@ -1171,6 +1915,35 @@
             menuDropdown.classList.add('hidden');
             loadSolutions();
             solutionsDialog.classList.remove('hidden');
+        });
+
+        // Share current state
+        menuShare.addEventListener('click', async () => {
+            menuDropdown.classList.add('hidden');
+
+            const state = {
+                a: getCurrentAlphabet(),
+                t: getTextContent(targetLetters, false),
+                s: getTextContent(starterWords, false),
+                e: getTextContent(excludeWords, false)
+            };
+
+            // Build URL with state
+            const url = new URL(window.location.href);
+            url.search = ''; // Clear existing params
+            if (state.a !== 'shavian') url.searchParams.set('a', state.a);
+            if (state.t) url.searchParams.set('t', state.t);
+            if (state.s) url.searchParams.set('s', state.s);
+            if (state.e) url.searchParams.set('e', state.e);
+
+            // Copy to clipboard
+            try {
+                await navigator.clipboard.writeText(url.toString());
+                alert('Share link copied to clipboard!');
+            } catch (err) {
+                // Fallback for browsers that don't support clipboard API
+                prompt('Copy this link to share:', url.toString());
+            }
         });
 
         // Close dialogs
@@ -1253,13 +2026,27 @@
 
                 const text = document.createElement('div');
                 text.className = 'solution-text';
-                text.textContent = solution.solveWords || '(empty)';
+
+                // For exact matches, just show the words
+                // For anagrams, show "anagram of: target"
+                if (solution.isExactMatch) {
+                    text.textContent = solution.solveWords || '(empty)';
+                } else {
+                    const targetPreview = solution.target ? solution.target.slice(0, 30) + (solution.target.length > 30 ? '...' : '') : 'all letters';
+                    text.innerHTML = `<span style="font-size: 0.9em; color: #6c757d;">anagram of:</span> ${targetPreview}`;
+                }
 
                 const meta = document.createElement('div');
                 meta.className = 'solution-meta';
-                const targetText = solution.target ? `Target: ${solution.target.slice(0, 20)}${solution.target.length > 20 ? '...' : ''}` : 'Target: All letters';
-                const excludeText = solution.excludeWords ? ` | Exclude: ${solution.excludeWords.slice(0, 20)}${solution.excludeWords.length > 20 ? '...' : ''}` : '';
-                meta.textContent = targetText + excludeText;
+
+                // Show solve words in meta for anagrams, or exclude words for exact matches
+                if (solution.isExactMatch) {
+                    const excludeText = solution.excludeWords ? `Exclude: ${solution.excludeWords.slice(0, 30)}${solution.excludeWords.length > 30 ? '...' : ''}` : '';
+                    meta.textContent = excludeText;
+                } else {
+                    const solveText = solution.solveWords ? `Words: ${solution.solveWords.slice(0, 30)}${solution.solveWords.length > 30 ? '...' : ''}` : 'No words';
+                    meta.textContent = solveText;
+                }
 
                 const removeBtn = document.createElement('button');
                 removeBtn.className = 'solution-remove';
@@ -1342,11 +2129,13 @@
 
         // Save current solution
         saveCurrentBtn.addEventListener('click', () => {
+            const target = getTextContent(targetLetters, false);
             const solution = {
                 alphabet: getCurrentAlphabet(),
-                target: getTextContent(targetLetters, false),
+                target: target,
                 solveWords: getTextContent(starterWords, false),
-                excludeWords: getTextContent(excludeWords, false)
+                excludeWords: getTextContent(excludeWords, false),
+                isExactMatch: !target || target.trim() === ''  // Exact match if no target letters
             };
 
             const solutions = getSavedSolutions();
@@ -1428,6 +2217,246 @@
 
         // Initialize solutions on load
         initializeSolutions();
+
+        // Global keyboard shortcuts for undo/redo
+        document.addEventListener('keydown', (e) => {
+            // Check for Cmd (Mac) or Ctrl (Windows/Linux)
+            const modifier = e.metaKey || e.ctrlKey;
+
+            if (modifier && e.key === 'z' && !e.shiftKey) {
+                // Undo: Cmd+Z or Ctrl+Z
+                e.preventDefault();
+                if (undoManager.undo()) {
+                    console.log('Undo performed');
+                }
+            } else if (modifier && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+                // Redo: Cmd+Shift+Z or Ctrl+Shift+Z
+                e.preventDefault();
+                if (undoManager.redo()) {
+                    console.log('Redo performed');
+                }
+            }
+        });
+
+        // Take initial snapshot
+        setTimeout(() => {
+            undoManager.takeSnapshot();
+        }, 100);
+
+        // ========================================
+        // Exact Match Actions
+        // ========================================
+
+        // Check if current pangram is already saved
+        function isCurrentPangramSaved() {
+            const current = {
+                alphabet: getCurrentAlphabet(),
+                target: getTextContent(targetLetters, false),
+                solveWords: getTextContent(starterWords, false),
+                excludeWords: getTextContent(excludeWords, false)
+            };
+
+            const solutions = getSavedSolutions();
+            return solutions.some(s =>
+                s.alphabet === current.alphabet &&
+                s.target === current.target &&
+                s.solveWords === current.solveWords &&
+                s.excludeWords === current.excludeWords
+            );
+        }
+
+        // Update save button state and text
+        function updateSaveButtonState() {
+            const hasExactMatch = currentParams && currentParams.letters === '';
+            const buttonText = hasExactMatch ? '💾 Save This Pangram' : '💾 Save This Anagram';
+
+            if (isCurrentPangramSaved()) {
+                saveExactMatchBtn.disabled = true;
+                saveExactMatchBtn.textContent = '✓ Already Saved';
+                saveExactMatchBtn.style.opacity = '0.6';
+                saveExactMatchBtn.style.cursor = 'not-allowed';
+            } else {
+                saveExactMatchBtn.disabled = false;
+                saveExactMatchBtn.textContent = buttonText;
+                saveExactMatchBtn.style.opacity = '1';
+                saveExactMatchBtn.style.cursor = 'pointer';
+            }
+        }
+
+        // Save exact match pangram
+        saveExactMatchBtn.addEventListener('click', () => {
+            if (allSolutions.length === 0 || saveExactMatchBtn.disabled) return;
+
+            const solution = {
+                alphabet: getCurrentAlphabet(),
+                target: getTextContent(targetLetters, false),
+                solveWords: getTextContent(starterWords, false),
+                excludeWords: getTextContent(excludeWords, false),
+                isExactMatch: true  // Mark as exact match
+            };
+
+            const solutions = getSavedSolutions();
+            solutions.push(solution);
+            saveSolutions(solutions);
+
+            // Update button state
+            updateSaveButtonState();
+
+            // Open saved solutions dialog to show the newly saved pangram
+            loadSolutions();
+            solutionsDialog.classList.remove('hidden');
+
+            // Hide the "Save Current Solution" button in the dialog
+            saveCurrentBtn.style.display = 'none';
+
+            // Scroll to bottom to show the new solution
+            setTimeout(() => {
+                solutionsList.scrollTop = solutionsList.scrollHeight;
+                // Restore the button when dialog is closed
+                const restoreButton = () => {
+                    saveCurrentBtn.style.display = '';
+                };
+                solutionsDialog.addEventListener('click', function closeHandler(e) {
+                    if (e.target === solutionsDialog || e.target.classList.contains('dialog-close')) {
+                        restoreButton();
+                        solutionsDialog.removeEventListener('click', closeHandler);
+                    }
+                });
+            }, 100);
+        });
+
+        // Encode words as compact string using alphabet offsets
+        function encodeWords(words, alphabet) {
+            if (!words) return '';
+
+            const baseCodepoint = alphabet === 'shavian' ? 0x10450 : 0x61; // 'a'
+
+            return words.split(/\s+/).map(word => {
+                let encoded = '';
+                for (const char of word) {
+                    const codepoint = char.codePointAt(0);
+                    // Handle punctuation and special chars (keep as-is with prefix)
+                    if (alphabet === 'shavian') {
+                        if (codepoint < 0x10450 || codepoint > 0x1047F) {
+                            // Non-alphabet char: use _ prefix + 4-digit hex
+                            encoded += '_' + codepoint.toString(16).padStart(4, '0');
+                        } else {
+                            // Alphabet char: 2-digit hex offset (00-2F for 48 letters)
+                            encoded += (codepoint - baseCodepoint).toString(16).padStart(2, '0');
+                        }
+                    } else {
+                        if (codepoint < 0x61 || codepoint > 0x7A) { // a-z
+                            // Non-alphabet char: use _ prefix + 4-digit hex
+                            encoded += '_' + codepoint.toString(16).padStart(4, '0');
+                        } else {
+                            // Alphabet char: 2-digit hex offset (00-19 for 26 letters)
+                            encoded += (codepoint - baseCodepoint).toString(16).padStart(2, '0');
+                        }
+                    }
+                }
+                return encoded;
+            }).join('-');
+        }
+
+        // Decode compact string back to words
+        function decodeWords(encoded, alphabet) {
+            if (!encoded) return '';
+
+            const baseCodepoint = alphabet === 'shavian' ? 0x10450 : 0x61;
+
+            return encoded.split('-').map(word => {
+                let decoded = '';
+                let i = 0;
+                while (i < word.length) {
+                    if (word[i] === '_') {
+                        // Non-alphabet char: read 4 hex digits after _
+                        const hex = word.substring(i + 1, i + 5);
+                        decoded += String.fromCodePoint(parseInt(hex, 16));
+                        i += 5;
+                    } else {
+                        // Alphabet char: read 2 hex digits
+                        const hex = word.substring(i, i + 2);
+                        decoded += String.fromCodePoint(baseCodepoint + parseInt(hex, 16));
+                        i += 2;
+                    }
+                }
+                return decoded;
+            }).join(' ');
+        }
+
+        // Share exact match or anagram
+        shareExactMatchBtn.addEventListener('click', async () => {
+            if (allSolutions.length === 0) return;
+
+            const solveWords = getTextContent(starterWords, false);
+            const targetText = getTextContent(targetLetters, false);
+            const alphabet = getCurrentAlphabet();
+            const hasExactMatch = currentParams && currentParams.letters === '';
+
+            // Build URL with state
+            const url = new URL(window.location.href);
+            url.search = ''; // Clear existing params
+            if (alphabet !== 'shavian') url.searchParams.set('a', alphabet);
+
+            if (hasExactMatch) {
+                // For exact matches, encode solve words compactly
+                const encoded = encodeWords(solveWords, alphabet);
+                if (encoded) url.searchParams.set('p', encoded); // 'p' for pangram
+            } else {
+                // For anagrams, include both target and solve words
+                const encodedTarget = encodeWords(targetText, alphabet);
+                const encodedSolve = encodeWords(solveWords, alphabet);
+                if (encodedTarget) url.searchParams.set('t', encodedTarget); // 't' for target
+                if (encodedSolve) url.searchParams.set('s', encodedSolve); // 's' for solve
+            }
+
+            // Copy to clipboard and show popup
+            try {
+                await navigator.clipboard.writeText(url.toString());
+
+                // Show success popup
+                const popup = document.createElement('div');
+                popup.className = 'share-popup';
+                popup.innerHTML = `
+                    <div class="share-popup-content">
+                        <div class="share-popup-icon">✅</div>
+                        <div class="share-popup-title">Link Copied!</div>
+                        <div class="share-popup-url">${url.toString()}</div>
+                        <div class="share-popup-message">Share this link to let others view your pangram</div>
+                    </div>
+                `;
+                document.body.appendChild(popup);
+
+                // Animate in
+                setTimeout(() => popup.classList.add('show'), 10);
+
+                // Remove after 4 seconds
+                setTimeout(() => {
+                    popup.classList.remove('show');
+                    setTimeout(() => popup.remove(), 300);
+                }, 4000);
+            } catch (err) {
+                // Fallback for browsers that don't support clipboard API
+                const fallbackPopup = document.createElement('div');
+                fallbackPopup.className = 'share-popup show';
+                fallbackPopup.innerHTML = `
+                    <div class="share-popup-content">
+                        <div class="share-popup-title">Copy this link:</div>
+                        <input type="text" value="${url.toString()}" readonly class="share-popup-input" />
+                        <button class="share-popup-close">Close</button>
+                    </div>
+                `;
+                document.body.appendChild(fallbackPopup);
+
+                const input = fallbackPopup.querySelector('.share-popup-input');
+                input.select();
+
+                fallbackPopup.querySelector('.share-popup-close').addEventListener('click', () => {
+                    fallbackPopup.classList.remove('show');
+                    setTimeout(() => fallbackPopup.remove(), 300);
+                });
+            }
+        });
     </script>
 </body>
 </html>
