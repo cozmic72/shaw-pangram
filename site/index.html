@@ -275,7 +275,12 @@
 
             const leading = leadingMatch ? leadingMatch[1] : '';
             const trailing = trailingMatch ? trailingMatch[1] : '';
-            const core = text.slice(leading.length, text.length - trailing.length);
+
+            // Get the middle part (between leading and trailing punctuation)
+            const middle = text.slice(leading.length, text.length - trailing.length);
+
+            // Strip all punctuation from core (including hyphens, apostrophes in middle)
+            const core = middle.replace(/[^\p{L}\p{N}]/gu, '');
 
             return { leading, core, trailing };
         }
