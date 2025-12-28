@@ -20,10 +20,15 @@ def extract_wordlists(readlex_path, output_dir):
             shaw = entry.get('Shaw', '').strip()
             latn = entry.get('Latn', '').strip()
 
+            # Split multi-word phrases on spaces and add each word separately
             if shaw:
-                shavian_words.add(shaw)
+                for word in shaw.split():
+                    if word:  # Skip empty strings
+                        shavian_words.add(word)
             if latn:
-                roman_words.add(latn)
+                for word in latn.split():
+                    if word:  # Skip empty strings
+                        roman_words.add(word)
 
     # Sort for consistent output
     shavian_words = sorted(shavian_words)
