@@ -1990,7 +1990,6 @@
             const alphabet = getCurrentAlphabet();
             const targetText = getTextContent(targetLetters, false);
             const solveWords = getTextContent(starterWords, false);
-            const excludeText = getTextContent(excludeWords, false);
 
             // Build URL with compact encoding (matching share button format)
             const url = new URL(window.location.href);
@@ -2006,8 +2005,7 @@
                 const encoded = encodeWords(solveWords, alphabet);
                 if (encoded) url.searchParams.set('s', encoded);
             }
-            // Keep exclude words as plain text (not used in solutions)
-            if (excludeText) url.searchParams.set('e', excludeText);
+            // Don't include exclude words in share links - they're not part of the solution
 
             // Copy to clipboard
             try {
