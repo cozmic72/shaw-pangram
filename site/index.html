@@ -15,6 +15,15 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 </head>
 <body>
+    <!-- Loading Splash Screen -->
+    <div id="loading-splash" class="loading-splash">
+        <div class="loading-content">
+            <h1>𐑖𐑱𐑝𐑾𐑯 Pangram Solver</h1>
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Loading dictionary...</p>
+        </div>
+    </div>
+
     <div class="container">
         <header>
             <button id="burger-menu" class="burger-menu" aria-label="Menu">
@@ -1216,17 +1225,45 @@
         let solverWorker = null;
         let workerReady = false;
 
+        // Helper to load and decompress gzipped text file
+        async function loadGzippedText(url) {
+            const response = await fetch(url + '.gz');
+            if (!response.ok) {
+                throw new Error(`Failed to load ${url}: ${response.statusText}`);
+            }
+
+            // Get the compressed data as a stream
+            const stream = response.body;
+
+            // Decompress using the browser's native DecompressionStream if available
+            // Otherwise fall back to fetching uncompressed version
+            if (typeof DecompressionStream !== 'undefined') {
+                const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+                const decompressedResponse = new Response(decompressedStream);
+                return await decompressedResponse.text();
+            } else {
+                // Fallback: load uncompressed version for older browsers
+                const fallbackResponse = await fetch(url);
+                if (!fallbackResponse.ok) {
+                    throw new Error(`Failed to load ${url}: ${fallbackResponse.statusText}`);
+                }
+                return await fallbackResponse.text();
+            }
+        }
+
         // Auto-load dictionary on page load
         (async function loadDictionary() {
             try {
-                const response = await fetch('readlex/readlex.json');
-                if (!response.ok) {
-                    throw new Error(`Failed to load: ${response.statusText}`);
-                }
-                const data = await response.json();
+                // Load Shavian words (gzipped)
+                const shavianText = await loadGzippedText('readlex/shavian-words.txt');
+                const shavianWords = shavianText.trim().split('\n');
+
+                // Load Roman words (gzipped)
+                const romanText = await loadGzippedText('readlex/roman-words.txt');
+                const romanWords = romanText.trim().split('\n');
 
                 // Initialize main thread solver (for fallback)
-                solver = new PangramSolver(data);
+                solver = new PangramSolver(shavianWords, romanWords);
 
                 // Initialize Web Worker
                 solverWorker = new Worker('pangram-worker.js');
@@ -1239,6 +1276,11 @@
                     if (type === 'ready') {
                         workerReady = true;
                         console.log('[Worker] Initialized and ready');
+
+                        // Hide loading splash screen
+                        const splash = document.getElementById('loading-splash');
+                        splash.classList.add('hidden');
+                        setTimeout(() => splash.style.display = 'none', 500);
 
                         // Load saved state after dictionary is loaded
                         loadState();
@@ -1283,10 +1325,10 @@
 
                 setupWorkerHandlers();
 
-                // Send dictionary to worker
+                // Send word lists to worker
                 solverWorker.postMessage({
                     type: 'init',
-                    data: { dictionary: data }
+                    data: { shavianWords, romanWords }
                 });
             } catch (err) {
                 console.error('Error loading dictionary:', err);
@@ -1325,14 +1367,17 @@
                 setupWorkerHandlers();
 
                 // Re-initialize with dictionary data
-                fetch('readlex/readlex.json')
-                    .then(r => r.json())
-                    .then(data => {
-                        solverWorker.postMessage({
-                            type: 'init',
-                            data: { dictionary: data }
-                        });
+                Promise.all([
+                    loadGzippedText('readlex/shavian-words.txt'),
+                    loadGzippedText('readlex/roman-words.txt')
+                ]).then(([shavianText, romanText]) => {
+                    const shavianWords = shavianText.trim().split('\n');
+                    const romanWords = romanText.trim().split('\n');
+                    solverWorker.postMessage({
+                        type: 'init',
+                        data: { shavianWords, romanWords }
                     });
+                });
             }
 
             // Start fresh

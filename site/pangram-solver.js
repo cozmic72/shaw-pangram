@@ -12,13 +12,10 @@ class TrieNode {
 }
 
 class PangramSolver {
-    constructor(wordsData) {
-        this.shawWords = []; // List of Shavian words
-        this.romanWords = []; // List of Roman words
-        this.shawToPos = new Map(); // Map from Shavian word -> Set of pos tags
-        this.romanToPos = new Map(); // Map from Roman word -> Set of pos tags
+    constructor(shavianWords, romanWords) {
+        this.shawWords = shavianWords || [];
+        this.romanWords = (romanWords || []).map(w => w.toLowerCase());
         this.trie = new TrieNode();
-        this.loadWords(wordsData);
 
         // Letter frequency for ordering (built during buildTrie)
         this.letterOrder = []; // Letters sorted by rarity (rarest first)
@@ -46,40 +43,6 @@ class PangramSolver {
         this.pausePromise = null;
     }
 
-    loadWords(data) {
-        console.log('Loading words from data...');
-
-        for (const [key, entries] of Object.entries(data)) {
-            for (const entry of entries) {
-                const shaw = entry.Shaw || '';
-                const roman = entry.Latn || '';
-                const pos = entry.pos || '';
-
-                if (shaw) {
-                    this.shawWords.push(shaw);
-                    if (!this.shawToPos.has(shaw)) {
-                        this.shawToPos.set(shaw, new Set());
-                    }
-                    if (pos) {
-                        this.shawToPos.get(shaw).add(pos);
-                    }
-                }
-
-                if (roman) {
-                    const romanLower = roman.toLowerCase();
-                    this.romanWords.push(romanLower);
-                    if (!this.romanToPos.has(romanLower)) {
-                        this.romanToPos.set(romanLower, new Set());
-                    }
-                    if (pos) {
-                        this.romanToPos.get(romanLower).add(pos);
-                    }
-                }
-            }
-        }
-
-        console.log(`Loaded ${this.shawWords.length} Shavian words, ${this.romanWords.length} Roman words`);
-    }
 
     // Helper to strip punctuation from a word, keeping only alphabet letters
     stripPunctuation(word, alphabet) {
@@ -98,7 +61,7 @@ class PangramSolver {
         }
     }
 
-    buildTrie(targetLetters, excludeWords = new Set(), excludePos = new Set(), alphabet = 'shavian') {
+    buildTrie(targetLetters, excludeWords = new Set(), alphabet = 'shavian') {
         this.trie = new TrieNode();
         this.keyToWords = new Map();
 
@@ -106,13 +69,9 @@ class PangramSolver {
         if (excludeWords.size > 0) {
             console.log(`Excluding ${excludeWords.size} word(s)`);
         }
-        if (excludePos.size > 0) {
-            console.log(`Excluding pos tags: ${[...excludePos].sort().join(', ')}`);
-        }
 
-        // Select word list and pos map based on alphabet
+        // Select word list based on alphabet
         const wordList = alphabet === 'roman' ? this.romanWords : this.shawWords;
-        const wordToPos = alphabet === 'roman' ? this.romanToPos : this.shawToPos;
 
         // Step 1: Build histogram of letter frequencies in target words
         const letterCounts = new Map();
@@ -128,15 +87,6 @@ class PangramSolver {
             // Check if word should be excluded
             if (excludeWords.has(word)) {
                 continue;
-            }
-
-            // Check if word has any excluded pos tags
-            if (excludePos.size > 0 && wordToPos.has(word)) {
-                const wordPosTags = wordToPos.get(word);
-                const hasExcludedPos = [...excludePos].some(pos => wordPosTags.has(pos));
-                if (hasExcludedPos) {
-                    continue;
-                }
             }
 
             // Check if word only uses target letters (using cleaned word)
@@ -230,7 +180,7 @@ class PangramSolver {
     }
 
     // Async generator wrapper around synchronous solver
-    async *solvePangramAsync(targetLetters = null, maxSolutions = null, excludeWords = new Set(), excludePos = new Set(), skipSolutions = 0, alphabet = 'shavian') {
+    async *solvePangramAsync(targetLetters = null, maxSolutions = null, excludeWords = new Set(), skipSolutions = 0, alphabet = 'shavian') {
         this.solutionQueue = [];
         let solverDone = false;
         let solverError = null;
@@ -254,7 +204,7 @@ class PangramSolver {
         // Start solver in background
         setTimeout(() => {
             try {
-                this.solvePangram(targetLetters, maxSolutions, excludeWords, excludePos, skipSolutions, alphabet);
+                this.solvePangram(targetLetters, maxSolutions, excludeWords, skipSolutions, alphabet);
                 solverDone = true;
             } catch (err) {
                 solverError = err;
@@ -289,7 +239,7 @@ class PangramSolver {
     }
 
     // Old generator version (keeping for reference, can be deleted later)
-    *solvePangramGenerator_old(targetLetters = null, maxSolutions = null, excludeWords = new Set(), excludePos = new Set(), skipSolutions = 0, alphabet = 'shavian') {
+    *solvePangramGenerator_old(targetLetters = null, maxSolutions = null, excludeWords = new Set(), skipSolutions = 0, alphabet = 'shavian') {
         if (targetLetters === null) {
             if (alphabet === 'roman') {
                 // All 26 Roman letters
@@ -322,7 +272,7 @@ class PangramSolver {
         }
 
         // Build Trie with filtered words
-        this.buildTrie(targetSet, excludeWords, excludePos, alphabet);
+        this.buildTrie(targetSet, excludeWords, alphabet);
 
         if (this.trie.children.size === 0) {
             console.log('No words found using only target letters!');
@@ -356,7 +306,7 @@ class PangramSolver {
         return solutions;
     }
 
-    solvePangram(targetLetters = null, maxSolutions = null, excludeWords = new Set(), excludePos = new Set(), skipSolutions = 0, alphabet = 'shavian') {
+    solvePangram(targetLetters = null, maxSolutions = null, excludeWords = new Set(), skipSolutions = 0, alphabet = 'shavian') {
         if (targetLetters === null) {
             if (alphabet === 'roman') {
                 // All 26 Roman letters
@@ -394,7 +344,7 @@ class PangramSolver {
         }
 
         // Build Trie with filtered words
-        this.buildTrie(targetSet, excludeWords, excludePos, alphabet);
+        this.buildTrie(targetSet, excludeWords, alphabet);
 
         if (this.trie.children.size === 0) {
             console.log('No words found using only target letters!');

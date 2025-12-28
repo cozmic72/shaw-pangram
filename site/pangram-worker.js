@@ -10,8 +10,8 @@ self.onmessage = function(e) {
     const { type, data } = e.data;
 
     if (type === 'init') {
-        // Initialize solver with dictionary data
-        solver = new PangramSolver(data.dictionary);
+        // Initialize solver with word lists
+        solver = new PangramSolver(data.shavianWords, data.romanWords);
         self.postMessage({ type: 'ready' });
     } else if (type === 'solve') {
         // Set up callback to send solutions back as they're found
@@ -28,7 +28,6 @@ self.onmessage = function(e) {
                 data.targetLetters,
                 data.maxSolutions,
                 data.excludeWords,
-                data.excludePos,
                 data.skipSolutions,
                 data.alphabet
             );

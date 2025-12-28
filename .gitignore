@@ -1,2 +1,4 @@
 # Build output
-site/readlex/
+site/readlex/*.txt
+site/readlex/*.txt.gz
+site/readlex/*.json
