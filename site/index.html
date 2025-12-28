@@ -1987,20 +1987,27 @@
         menuShare.addEventListener('click', async () => {
             menuDropdown.classList.add('hidden');
 
-            const state = {
-                a: getCurrentAlphabet(),
-                t: getTextContent(targetLetters, false),
-                s: getTextContent(starterWords, false),
-                e: getTextContent(excludeWords, false)
-            };
+            const alphabet = getCurrentAlphabet();
+            const targetText = getTextContent(targetLetters, false);
+            const solveWords = getTextContent(starterWords, false);
+            const excludeText = getTextContent(excludeWords, false);
 
-            // Build URL with state
+            // Build URL with compact encoding (matching share button format)
             const url = new URL(window.location.href);
             url.search = ''; // Clear existing params
-            if (state.a !== 'shavian') url.searchParams.set('a', state.a);
-            if (state.t) url.searchParams.set('t', state.t);
-            if (state.s) url.searchParams.set('s', state.s);
-            if (state.e) url.searchParams.set('e', state.e);
+            if (alphabet !== 'shavian') url.searchParams.set('a', alphabet);
+
+            // Use compact encoding for target and solve words
+            if (targetText) {
+                const encoded = encodeWords(targetText, alphabet);
+                if (encoded) url.searchParams.set('t', encoded);
+            }
+            if (solveWords) {
+                const encoded = encodeWords(solveWords, alphabet);
+                if (encoded) url.searchParams.set('s', encoded);
+            }
+            // Keep exclude words as plain text (not used in solutions)
+            if (excludeText) url.searchParams.set('e', excludeText);
 
             // Copy to clipboard
             try {
